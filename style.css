@@ -1,4 +1,8 @@
 
+* {
+    box-sizing: border-box;
+}
+
 body {
     background-color: #151922;
     color: white;
@@ -12,6 +16,14 @@ header {
     text-align: center;
 }
 
+header h1 {
+    margin: 0;
+}
+
+header p {
+    color: #aab5c5;
+}
+
 main {
     max-width: 700px;
     margin: 40px auto;
@@ -21,8 +33,24 @@ main {
 #messages {
     background-color: #202735;
     min-height: 350px;
+    max-height: 500px;
+    overflow-y: auto;
     padding: 15px;
     border-radius: 10px;
+    overflow-wrap: anywhere;
+}
+
+.message {
+    background-color: #303c50;
+    padding: 10px;
+    border-radius: 7px;
+    margin-bottom: 10px;
+}
+
+.message small {
+    display: block;
+    color: #9eacc0;
+    margin-top: 5px;
 }
 
 .input-area {
@@ -33,9 +61,11 @@ main {
 
 input {
     flex: 1;
+    min-width: 0;
     padding: 12px;
     border-radius: 6px;
     border: none;
+    outline: none;
 }
 
 button {
@@ -45,4 +75,18 @@ button {
     border: none;
     border-radius: 6px;
     cursor: pointer;
+}
+
+button:hover {
+    background-color: #4477dd;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#status {
+    color: #aab5c5;
+    font-size: 13px;
 }
