@@ -57,11 +57,16 @@ const bioInput = document.getElementById("bioInput");
 const saveProfileButton = document.getElementById("saveProfile");
 const myProfileButton = document.getElementById("myProfileButton");
 const messageButton = document.getElementById("messageButton");
+const profileHandle = document.getElementById("profileHandle");
+const profileBadges = document.getElementById("profileBadges");
+const displayNameInput = document.getElementById("displayNameInput");
+const roomTabs = document.getElementById("roomTabs");
 
 const usernamePattern = /^[a-z1-9_]{1,20}$/;
 
 let currentSession = null;
 let chatChannel = null;
+let activeRoom = "goldfish";
 
 // ---------- Dark mode ----------
 
@@ -234,13 +239,36 @@ function getProfile(userId, force = false) {
 
     const request = db
         .from("profiles")
-        .select("id, username, bio, avatar_url")
+        .select("id, username, display_name, bio, avatar_url, user_badges(badge_key, badges(label, emoji, color))")
         .eq("id", userId)
         .single()
         .then(({ data }) => data);
 
     profileCache.set(userId, request);
     return request;
+}
+
+function displayNameOf(profile) {
+    return (profile && (profile.display_name || profile.username)) || "Unknown";
+}
+
+function badgeList(profile) {
+    return ((profile && profile.user_badges) || [])
+        .map((b) => b.badges)
+        .filter(Boolean);
+}
+
+function renderBadges(container, profile) {
+    container.replaceChildren();
+
+    badgeList(profile).forEach((b) => {
+        const pill = document.createElement("span");
+        pill.className = "pill";
+        pill.textContent = b.emoji + " " + b.label;
+        pill.style.color = b.color;
+        pill.style.borderColor = b.color;
+        container.appendChild(pill);
+    });
 }
 
 function renderAvatar(el, profile) {
@@ -264,6 +292,8 @@ async function openProfile(userId) {
     profileName.textContent = "Loading...";
     profileBio.textContent = "";
     profileAvatar.replaceChildren();
+    profileHandle.textContent = "";
+    profileBadges.replaceChildren();
     profileEdit.hidden = true;
     messageButton.hidden = true;
 
@@ -277,7 +307,9 @@ async function openProfile(userId) {
     }
 
     renderAvatar(profileAvatar, profile);
-    profileName.textContent = profile.username;
+    profileName.textContent = displayNameOf(profile);
+    profileHandle.textContent = "@" + profile.username;
+    renderBadges(profileBadges, profile);
     profileBio.textContent = profile.bio || "No bio yet.";
 
     const isMine = currentSession && currentSession.user.id === userId;
@@ -285,6 +317,7 @@ async function openProfile(userId) {
     messageButton.hidden = isMine || !currentSession;
 
     if (isMine) {
+        displayNameInput.value = profile.display_name || "";
         bioInput.value = profile.bio || "";
         avatarFile.value = "";
     }
@@ -294,7 +327,10 @@ async function saveProfile() {
     if (!currentSession) return;
 
     const userId = currentSession.user.id;
-    const updates = { bio: bioInput.value.trim().slice(0, 300) };
+    const updates = {
+        display_name: displayNameInput.value.trim().slice(0, 30) || null,
+        bio: bioInput.value.trim().slice(0, 300)
+    };
     const file = avatarFile.files[0];
 
     saveProfileButton.disabled = true;
@@ -386,6 +422,9 @@ function displayMessage(msg) {
     name.textContent = msg.username || "Unknown";
     name.addEventListener("click", () => openProfile(msg.user_id));
 
+    const tag = document.createElement("span");
+    tag.className = "name-tag";
+
     const text = document.createElement("span");
     text.textContent = ": " + msg.content;
 
@@ -393,7 +432,7 @@ function displayMessage(msg) {
     time.textContent = new Date(msg.created_at).toLocaleString();
 
     const line = document.createElement("div");
-    line.append(name, text);
+    line.append(name, tag, text);
     body.append(line, time);
     item.append(avatar, body);
 
@@ -403,16 +442,25 @@ function displayMessage(msg) {
     // Fill in avatar and name once the profile loads
     getProfile(msg.user_id).then((profile) => {
         renderAvatar(avatar, profile);
-        if (profile) name.textContent = profile.username;
+        if (profile) name.textContent = displayNameOf(profile);
+
+        const badges = badgeList(profile);
+        tag.textContent = badges.map((b) => b.emoji).join("");
+        tag.title = badges.map((b) => b.label).join(", ");
     });
 }
 
 // Load messages
 async function loadMessages() {
+    const room = activeRoom;
+
     const { data, error } = await db
         .from("messages")
         .select("*")
+        .eq("room", room)
         .order("created_at", { ascending: true });
+
+    if (room !== activeRoom) return;
 
     if (error) {
         status.textContent = "Message loading failed: " + error.message;
@@ -441,6 +489,7 @@ async function sendMessage() {
         .from("messages")
         .insert({
             user_id: currentSession.user.id,
+            room: activeRoom,
             content: content
         });
 
@@ -478,7 +527,7 @@ function listenForMessages() {
                 table: "messages"
             },
             (payload) => {
-                displayMessage(payload.new);
+                if (payload.new.room === activeRoom) displayMessage(payload.new);
             }
         )
         .subscribe((state) => {
@@ -495,6 +544,25 @@ function listenForMessages() {
             }
         });
 }
+
+// Switch chat rooms
+input.placeholder = "Message #" + activeRoom + "...";
+
+roomTabs.addEventListener("click", (event) => {
+    const button = event.target.closest(".room");
+
+    if (!button || button.dataset.room === activeRoom) return;
+
+    activeRoom = button.dataset.room;
+
+    roomTabs.querySelectorAll(".room").forEach((b) => {
+        b.classList.toggle("active", b === button);
+    });
+
+    input.placeholder = "Message #" + activeRoom + "...";
+    messages.replaceChildren();
+    loadMessages();
+});
 
 // ---------- Direct messages ----------
 
@@ -603,7 +671,7 @@ async function loadConversations() {
 
         getProfile(otherId).then((profile) => {
             renderAvatar(avatar, profile);
-            name.textContent = profile ? profile.username : "Unknown";
+            name.textContent = profile ? displayNameOf(profile) : "Unknown";
         });
     });
 }
@@ -630,7 +698,7 @@ async function openConversation(userId) {
 
     if (activeDM !== userId) return;
 
-    dmHeaderName.textContent = profile ? profile.username : "Unknown";
+    dmHeaderName.textContent = profile ? displayNameOf(profile) : "Unknown";
     renderAvatar(dmHeaderAvatar, profile);
 
     const { data, error } = await db
