@@ -595,3 +595,8 @@ button.danger {
     color: #e53935;
     border-color: #e53935;
 }
+
+/* IDs beat the [hidden] attribute, so hide these explicitly */
+#profileEdit[hidden] {
+    display: none;
+}
