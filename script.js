@@ -77,7 +77,7 @@ const sendButton = document.getElementById("sendButton");
 const currentUser = document.getElementById("currentUser");
 const status = document.getElementById("status");
 
-// New chat elements (online list, typing, reply bar)
+// New chat elements
 const onlineBar = document.getElementById("onlineBar");
 const typingEl = document.getElementById("typing");
 const replyBar = document.getElementById("replyBar");
@@ -140,8 +140,6 @@ let activeRoom = "goldfish";
 let myUsername = "";
 let replyingTo = null;
 let presenceChannel = null;
-let typingTimer = null;
-let audioCtx = null;
 const messageCache = new Map(); 
 
 let isStaff = false;
@@ -149,9 +147,6 @@ let isOwner = false;
 let isBanned = false;
 let allBadges = [];
 
-const REACTION_EMOJIS = ["👍", "😂", "🔥", "😮", "😢", "💯"];
-const reactionsByMsg = new Map(); 
-const reactionBars = new Map();   
 const shownMessages = new Set();  
 
 // ---------- Dark mode ----------
@@ -838,10 +833,6 @@ async function searchAdminUsers(query) {
         delAccBtn.addEventListener("click", async () => {
             if (!confirm(`Delete user account ${u.username}? This cannot be undone.`)) return;
             
-            // NOTE: To fix the deletion error you encountered previously, 
-            // you should route account deletions through a Supabase Edge Function 
-            // or server-side API using `supabase.auth.admin.deleteUser(u.id)` 
-            // instead of deleting from storage/tables directly.
             const { error: err } = await db.from("profiles").delete().eq("id", u.id);
             if (err) status.textContent = "Account delete failed: " + err.message;
             else {
