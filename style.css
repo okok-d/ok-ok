@@ -40,8 +40,12 @@ main {
 }
 
 .message {
-    margin-bottom: 12px;
+    background-color: white;
+    border: 1px solid black;
+    padding: 10px;
+    margin-bottom: 10px;
     overflow-wrap: anywhere;
+}
 }
 
 .message small {
