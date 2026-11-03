@@ -385,6 +385,11 @@ a {
     padding: 1rem;
 }
 
+/* Ensures the hidden attribute actually hides the modal completely */
+.modal[hidden] {
+    display: none !important;
+}
+
 .modal-card {
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
