@@ -715,6 +715,8 @@ async function renderModeration(userId, profile, isMine) {
     // Owner: give or remove badges
     if (isOwner) {
         badgeManager.replaceChildren();
+        modSection.querySelector(".field-label").textContent =
+            isMine ? "Your badges (click to give or remove)" : "Moderation";
 
         allBadges.forEach((b) => {
             const has = targetKeys.includes(b.key);
@@ -723,7 +725,6 @@ async function renderModeration(userId, profile, isMine) {
             button.className = "chip" + (has ? " mine" : "");
             button.append(makeIcon(b.icon), " " + b.label);
             button.title = has ? "Click to remove" : "Click to give";
-            button.disabled = isMine && b.key === "owner";
             button.addEventListener("click", () => toggleBadge(userId, b.key, has));
 
             badgeManager.appendChild(button);
@@ -758,6 +759,12 @@ async function renderModeration(userId, profile, isMine) {
 }
 
 async function toggleBadge(userId, key, has) {
+    const mine = currentSession && userId === currentSession.user.id;
+
+    if (has && mine && key === "owner") {
+        if (!confirm("Remove your own Owner badge? You will lose your owner tools.")) return;
+    }
+
     const { error } = has
         ? await db.from("user_badges").delete().eq("user_id", userId).eq("badge_key", key)
         : await db.from("user_badges").insert({ user_id: userId, badge_key: key });
@@ -768,6 +775,7 @@ async function toggleBadge(userId, key, has) {
     }
 
     profileCache.delete(userId);
+    if (mine) await loadRoles();
     await openProfile(userId);
     await loadMessages();
 }
