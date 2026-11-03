@@ -1,7 +1,9 @@
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Chat</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -14,15 +16,27 @@
 
     <main>
         <div id="messages">
-            <p>Welcome to My Chat!</p>
+            <p>Loading messages...</p>
         </div>
 
         <div class="input-area">
-            <input id="message" placeholder="Write a message...">
-            <button onclick="sendMessage()">Send</button>
+            <input
+                id="message"
+                type="text"
+                maxlength="1000"
+                placeholder="Write a message..."
+                autocomplete="off"
+            >
+            <button id="sendButton" onclick="sendMessage()">
+                Send
+            </button>
         </div>
+
+        <p id="status">Connecting...</p>
     </main>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="script.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="script.js"></script>
+
 </body>
 </html>
