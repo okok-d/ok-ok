@@ -1,4 +1,3 @@
-
 const SUPABASE_URL = "https://xsehbpikhmofqjeandey.supabase.co";
 const SUPABASE_KEY = "sb_publishable_bC53WFgEwu4NDllgbYqjUQ_eCMcG3vl";
 
@@ -30,6 +29,17 @@ const input = document.getElementById("message");
 const sendButton = document.getElementById("sendButton");
 const currentUser = document.getElementById("currentUser");
 const status = document.getElementById("status");
+
+// Profile elements
+const profileModal = document.getElementById("profileModal");
+const profileAvatar = document.getElementById("profileAvatar");
+const profileName = document.getElementById("profileName");
+const profileBio = document.getElementById("profileBio");
+const profileEdit = document.getElementById("profileEdit");
+const avatarFile = document.getElementById("avatarFile");
+const bioInput = document.getElementById("bioInput");
+const saveProfileButton = document.getElementById("saveProfile");
+const myProfileButton = document.getElementById("myProfileButton");
 
 const usernamePattern = /^[a-z1-9_]{1,20}$/;
 
@@ -128,6 +138,7 @@ logoutButton.addEventListener("click", async () => {
     }
 
     currentSession = null;
+    profileModal.hidden = true;
     authArea.hidden = false;
     chatArea.hidden = true;
     status.textContent = "Logged out.";
@@ -164,22 +175,176 @@ async function updateAccount(session) {
     status.textContent = "Connected to chat!";
 }
 
+// ---------- Profiles ----------
+
+// Cache so each profile is only fetched once
+const profileCache = new Map();
+
+function getProfile(userId, force = false) {
+    if (!force && profileCache.has(userId)) return profileCache.get(userId);
+
+    const request = db
+        .from("profiles")
+        .select("id, username, bio, avatar_url")
+        .eq("id", userId)
+        .single()
+        .then(({ data }) => data);
+
+    profileCache.set(userId, request);
+    return request;
+}
+
+function renderAvatar(el, profile) {
+    el.replaceChildren();
+    const url = profile && profile.avatar_url;
+
+    // Only trust images from your own Supabase storage
+    if (url && url.startsWith(SUPABASE_URL + "/storage/")) {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = "";
+        el.appendChild(img);
+    } else {
+        el.textContent = ((profile && profile.username) || "?")[0].toUpperCase();
+    }
+}
+
+async function openProfile(userId) {
+    profileModal.hidden = false;
+    profileName.textContent = "Loading...";
+    profileBio.textContent = "";
+    profileAvatar.replaceChildren();
+    profileEdit.hidden = true;
+
+    const profile = await getProfile(userId, true);
+
+    if (!profile) {
+        profileName.textContent = "Profile not found";
+        return;
+    }
+
+    renderAvatar(profileAvatar, profile);
+    profileName.textContent = profile.username;
+    profileBio.textContent = profile.bio || "No bio yet.";
+
+    const isMine = currentSession && currentSession.user.id === userId;
+    profileEdit.hidden = !isMine;
+
+    if (isMine) {
+        bioInput.value = profile.bio || "";
+        avatarFile.value = "";
+    }
+}
+
+async function saveProfile() {
+    if (!currentSession) return;
+
+    const userId = currentSession.user.id;
+    const updates = { bio: bioInput.value.trim().slice(0, 300) };
+    const file = avatarFile.files[0];
+
+    saveProfileButton.disabled = true;
+
+    if (file) {
+        const allowed = ["image/png", "image/jpeg", "image/webp"];
+
+        if (!allowed.includes(file.type) || file.size > 2 * 1024 * 1024) {
+            status.textContent = "Avatar must be a PNG, JPG, or WebP under 2 MB.";
+            saveProfileButton.disabled = false;
+            return;
+        }
+
+        const path = userId + "/avatar";
+
+        const { error: uploadError } = await db.storage
+            .from("avatars")
+            .upload(path, file, { upsert: true, contentType: file.type });
+
+        if (uploadError) {
+            status.textContent = "Upload failed: " + uploadError.message;
+            saveProfileButton.disabled = false;
+            return;
+        }
+
+        const { data } = db.storage.from("avatars").getPublicUrl(path);
+        updates.avatar_url = data.publicUrl + "?v=" + Date.now(); // bust cache
+    }
+
+    const { error } = await db
+        .from("profiles")
+        .update(updates)
+        .eq("id", userId);
+
+    saveProfileButton.disabled = false;
+
+    if (error) {
+        status.textContent = "Save failed: " + error.message;
+        return;
+    }
+
+    profileCache.delete(userId);
+    await openProfile(userId);
+    await loadMessages();
+    status.textContent = "Profile saved!";
+}
+
+myProfileButton.addEventListener("click", () => {
+    if (currentSession) openProfile(currentSession.user.id);
+});
+
+saveProfileButton.addEventListener("click", saveProfile);
+
+document.getElementById("closeProfile").addEventListener("click", () => {
+    profileModal.hidden = true;
+});
+
+profileModal.addEventListener("click", (event) => {
+    if (event.target === profileModal) profileModal.hidden = true;
+});
+
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") profileModal.hidden = true;
+});
+
+// ---------- Messages ----------
+
 // Display a message
 function displayMessage(msg) {
     const item = document.createElement("div");
     item.className = "message";
 
-    const text = document.createElement("div");
-    text.textContent = (msg.username || "Unknown") + ": " + msg.content;
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = "?";
+    avatar.addEventListener("click", () => openProfile(msg.user_id));
+
+    const body = document.createElement("div");
+    body.className = "message-body";
+
+    const name = document.createElement("button");
+    name.className = "name-link";
+    name.textContent = msg.username || "Unknown";
+    name.addEventListener("click", () => openProfile(msg.user_id));
+
+    const text = document.createElement("span");
+    text.textContent = ": " + msg.content;
 
     const time = document.createElement("small");
     time.textContent = new Date(msg.created_at).toLocaleString();
 
-    item.appendChild(text);
-    item.appendChild(time);
+    const line = document.createElement("div");
+    line.append(name, text);
+    body.append(line, time);
+    item.append(avatar, body);
 
     messages.appendChild(item);
     messages.scrollTop = messages.scrollHeight;
+
+    // Fill in avatar and name once the profile loads
+    getProfile(msg.user_id).then((profile) => {
+        renderAvatar(avatar, profile);
+        if (profile) name.textContent = profile.username;
+    });
 }
 
 // Load messages
