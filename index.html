@@ -16,6 +16,9 @@
         }
     </script>
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Caveat&family=Creepster&family=Dancing+Script&family=Lobster&family=Orbitron&family=Pacifico&family=Permanent+Marker&family=Press+Start+2P&family=Special+Elite&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -180,6 +183,7 @@
         <div class="modal-card">
             <button id="closeProfile" class="close">✕</button>
 
+            <div id="profileBanner" class="banner"></div>
             <div id="profileAvatar" class="avatar big"></div>
             <h2 id="profileName"></h2>
             <p id="profileHandle" class="handle"></p>
@@ -187,6 +191,12 @@
             <p id="profileBio"></p>
 
             <button id="messageButton" hidden>Message</button>
+
+            <div id="modSection" class="mod-section" hidden>
+                <div class="field-label">Moderation</div>
+                <div id="badgeManager" class="badge-manager" hidden></div>
+                <button id="banButton" hidden>Ban user</button>
+            </div>
 
             <div id="profileEdit" hidden>
                 <input
@@ -196,11 +206,34 @@
                     placeholder="Display name (30 characters max)"
                 >
 
+                <label class="field-label">Profile picture (PNG, JPG, WebP, GIF, 5 MB max)</label>
                 <input
                     id="avatarFile"
                     type="file"
                     accept="image/png,image/jpeg,image/webp,image/gif"
                 >
+
+                <label class="field-label">Banner (PNG, JPG, WebP, GIF, 5 MB max)</label>
+                <input
+                    id="bannerFile"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                >
+
+                <label class="field-label">Name font</label>
+                <select id="fontSelect">
+                    <option value="">Default</option>
+                    <option value="pacifico">Pacifico</option>
+                    <option value="lobster">Lobster</option>
+                    <option value="permanent-marker">Permanent Marker</option>
+                    <option value="press-start">Press Start 2P (pixel)</option>
+                    <option value="orbitron">Orbitron (futuristic)</option>
+                    <option value="creepster">Creepster (spooky)</option>
+                    <option value="bungee">Bungee</option>
+                    <option value="caveat">Caveat (handwriting)</option>
+                    <option value="dancing-script">Dancing Script</option>
+                    <option value="special-elite">Special Elite (typewriter)</option>
+                </select>
 
                 <textarea
                     id="bioInput"
