@@ -87,11 +87,9 @@ document.getElementById("replyCancel").addEventListener("click", () => clearRepl
 // Tabs and DM elements
 const tabPublic = document.getElementById("tabPublic");
 const tabDMs = document.getElementById("tabDMs");
-const tabBlirs = document.getElementById("tabBlirs");
 const dmBadge = document.getElementById("dmBadge");
 const publicPanel = document.getElementById("publicPanel");
 const dmPanel = document.getElementById("dmPanel");
-const blirsPanel = document.getElementById("blirsPanel");
 const dmListView = document.getElementById("dmListView");
 const dmList = document.getElementById("dmList");
 const dmChatView = document.getElementById("dmChatView");
@@ -277,7 +275,6 @@ async function updateAccount(session) {
         leavePresence();
         clearReply();
         resetDMs();
-        blirsApi.sync(null);
         authArea.hidden = false;
         chatArea.hidden = true;
         return;
@@ -310,7 +307,6 @@ async function updateAccount(session) {
     listenForDMs();
     await loadMessages();
     joinPresence();
-    blirsApi.sync(session);
     status.textContent = "Connected to chat!";
 }
 
@@ -503,7 +499,6 @@ async function openProfile(userId) {
     banButton.hidden = true;
     profileEdit.hidden = true;
     messageButton.hidden = true;
-    blirsApi.resetProfileView();
 
     const profile = await getProfile(userId, true);
 
@@ -526,9 +521,6 @@ async function openProfile(userId) {
     const isMine = currentSession && currentSession.user.id === userId;
     profileEdit.hidden = !isMine;
     messageButton.hidden = isMine || !currentSession;
-
-    // Blir showcase (loads on its own; doesn't block the rest of the profile)
-    blirsApi.showProfile(userId, !!isMine);
 
     if (isMine) {
         displayNameInput.value = profile.display_name || "";
@@ -1277,11 +1269,6 @@ function listenForMessages() {
                     const b = roomTabs.querySelector('[data-room="' + payload.new.room + '"]');
                     if (b) b.classList.add("unread");
                 }
-
-                // Counts toward the "send 5 chat messages" blir quest
-                if (currentSession && payload.new.user_id === currentSession.user.id) {
-                    blirsApi.countMessage();
-                }
             }
         )
         .on(
@@ -1376,17 +1363,15 @@ function updateBadge() {
     dmBadge.textContent = unreadFrom.size;
 }
 
-// view: false = public chat, true = DMs, "admin" = admin panel, "blirs" = blirs game
+// view: false = public chat, true = DMs, "admin" = admin panel
 function switchPanel(view) {
-    const v = view === "admin" ? "admin" : view === "blirs" ? "blirs" : view ? "dms" : "public";
+    const v = view === "admin" ? "admin" : view ? "dms" : "public";
 
     publicPanel.hidden = v !== "public";
     dmPanel.hidden = v !== "dms";
-    blirsPanel.hidden = v !== "blirs";
     adminPanel.hidden = v !== "admin";
     tabPublic.classList.toggle("active", v === "public");
     tabDMs.classList.toggle("active", v === "dms");
-    tabBlirs.classList.toggle("active", v === "blirs");
     tabAdmin.classList.toggle("active", v === "admin");
 }
 
@@ -1656,17 +1641,193 @@ function resetDMs() {
     }
 }
 
-// =====================================================================
-// RESTORED: admin panel (your pasted file ended before this existed).
-// If your real script.js already has loadAdmin() and its handlers, delete
-// this whole block and keep yours.
-// =====================================================================
+// ---------- Admin panel (owner only; the database enforces the rules) ----------
 
 let adminUsers = [];
-let adminBadgeKeys = new Map(); // user id -> [badge keys]
+const adminBanned = new Set();
 
-async function clearRoom(room) {
-    if (!isOwner) return;
+function adminButton(label, onClick, options = {}) {
+    const button = document.createElement("button");
+    button.textContent = label;
+    if (options.danger) button.className = "danger";
+    if (options.disabled) button.disabled = true;
+    button.addEventListener("click", onClick);
+    return button;
+}
+
+async function loadAdmin() {
+    if (!isOwner || !currentSession) return;
+
+    adminStats.textContent = "Loading...";
+    adminRooms.replaceChildren();
+
+    roomTabs.querySelectorAll(".room").forEach((r) => {
+        const room = r.dataset.room;
+        const button = document.createElement("button");
+        button.className = "room";
+        button.textContent = "Clear #" + room;
+        button.addEventListener("click", () => adminClearRoom(room));
+        adminRooms.appendChild(button);
+    });
+
+    let [profiles, bans, msgs] = await Promise.all([
+        db.from("profiles")
+            .select("id, username, display_name, user_badges(badge_key, badges(label, icon, color))")
+            .order("username"),
+        db.from("bans").select("user_id"),
+        db.from("messages").select("id", { count: "exact", head: true })
+    ]);
+
+    if (profiles.error) {
+        const plain = await db
+            .from("profiles")
+            .select("id, username, display_name")
+            .order("username");
+
+        if (!plain.error) {
+            const [ub, all] = await Promise.all([
+                db.from("user_badges").select("user_id, badge_key"),
+                db.from("badges").select("key, label, icon, color")
+            ]);
+            const byKey = new Map((all.data || []).map((b) => [b.key, b]));
+
+            plain.data.forEach((u) => {
+                u.user_badges = (ub.data || [])
+                    .filter((r) => r.user_id === u.id)
+                    .map((r) => ({ badge_key: r.badge_key, badges: byKey.get(r.badge_key) || null }));
+            });
+        }
+
+        profiles = plain;
+    }
+
+    if (profiles.error) {
+        adminStats.textContent = "Could not load users: " + profiles.error.message;
+        return;
+    }
+
+    adminUsers = profiles.data || [];
+    adminBanned.clear();
+    (bans.data || []).forEach((b) => adminBanned.add(b.user_id));
+
+    updateAdminStats(msgs.count);
+    renderAdminList();
+}
+
+function updateAdminStats(messageCount) {
+    if (messageCount !== undefined) adminStats.dataset.messages = messageCount ?? "?";
+
+    adminStats.textContent =
+        adminUsers.length + " users, " +
+        adminBanned.size + " banned, " +
+        (adminStats.dataset.messages || "?") + " messages";
+}
+
+function renderAdminList() {
+    if (!currentSession) return;
+
+    const me = currentSession.user.id;
+    const query = adminSearch.value.trim().toLowerCase();
+
+    adminList.replaceChildren();
+
+    adminUsers
+        .filter((u) =>
+            !query ||
+            u.username.toLowerCase().includes(query) ||
+            (u.display_name || "").toLowerCase().includes(query))
+        .forEach((u) => {
+            const mine = u.id === me;
+            const banned = adminBanned.has(u.id);
+
+            const row = document.createElement("div");
+            row.className = "admin-row";
+
+            const info = document.createElement("div");
+            info.className = "admin-info";
+
+            const name = document.createElement("strong");
+            name.textContent = displayNameOf(u);
+
+            const handle = document.createElement("span");
+            handle.className = "handle";
+            handle.textContent = "@" + u.username + (mine ? " (you)" : "");
+
+            const badges = document.createElement("div");
+            badges.className = "badges";
+            renderBadges(badges, u);
+
+            if (banned) {
+                const pill = document.createElement("span");
+                pill.className = "pill banned";
+                pill.append(makeIcon("skull-bones"), " Banned");
+                badges.appendChild(pill);
+            }
+
+            info.append(name, handle, badges);
+
+            const actions = document.createElement("div");
+            actions.className = "admin-actions";
+            actions.append(
+                adminButton("Badges", () => openProfile(u.id)),
+                adminButton(banned ? "Unban" : "Ban", () => adminToggleBan(u, banned), { disabled: mine }),
+                adminButton("Delete messages", () => adminWipeMessages(u)),
+                adminButton("Delete account", () => adminDeleteUser(u), { danger: true, disabled: mine })
+            );
+
+            row.append(info, actions);
+            adminList.appendChild(row);
+        });
+
+    if (!adminList.children.length) {
+        const empty = document.createElement("p");
+        empty.className = "dm-empty";
+        empty.textContent = "No users match.";
+        adminList.appendChild(empty);
+    }
+}
+
+async function adminToggleBan(user, banned) {
+    const { error } = banned
+        ? await db.from("bans").delete().eq("user_id", user.id)
+        : await db.from("bans").insert({
+            user_id: user.id,
+            banned_by: currentSession.user.id
+        });
+
+    if (error) {
+        status.textContent = "Ban change failed: " + error.message;
+        return;
+    }
+
+    if (banned) adminBanned.delete(user.id);
+    else adminBanned.add(user.id);
+
+    status.textContent = (banned ? "Unbanned " : "Banned ") + "@" + user.username + ".";
+    updateAdminStats();
+    renderAdminList();
+}
+
+async function adminWipeMessages(user) {
+    if (!confirm("Delete every public message from @" + user.username + "?")) return;
+
+    const { data, error } = await db
+        .from("messages")
+        .delete()
+        .eq("user_id", user.id)
+        .select("id");
+
+    if (error) {
+        status.textContent = "Delete failed: " + error.message;
+        return;
+    }
+
+    status.textContent = "Deleted " + (data ? data.length : 0) + " messages from @" + user.username + ".";
+    await loadMessages();
+    loadAdmin();
+}
+
+async function adminClearRoom(room) {
     if (!confirm("Delete EVERY message in #" + room + "? This cannot be undone.")) return;
 
     const { data, error } = await db
@@ -1681,103 +1842,47 @@ async function clearRoom(room) {
     }
 
     status.textContent = "Cleared #" + room + " (" + (data ? data.length : 0) + " messages).";
-    if (room === activeRoom) loadMessages();
+    await loadMessages();
+    loadAdmin();
 }
 
-function renderAdminList() {
-    const q = adminSearch.value.trim().toLowerCase();
+async function adminDeleteUser(user) {
+    const answer = prompt(
+        "This permanently deletes @" + user.username +
+        " and all of their messages, DMs, badges and uploads.\n\n" +
+        'Type "' + user.username + '" to confirm:'
+    );
 
-    adminList.replaceChildren();
-
-    adminUsers
-        .filter((u) =>
-            !q ||
-            (u.username || "").toLowerCase().includes(q) ||
-            (u.display_name || "").toLowerCase().includes(q))
-        .slice(0, 200)
-        .forEach((u) => {
-            const row = document.createElement("div");
-            row.className = "admin-row";
-
-            const info = document.createElement("div");
-            info.className = "admin-info";
-
-            const name = document.createElement("strong");
-            name.textContent = u.display_name || u.username;
-
-            const handle = document.createElement("span");
-            handle.className = "handle";
-            handle.textContent = "@" + u.username;
-
-            const badges = document.createElement("div");
-            badges.className = "badges";
-
-            (adminBadgeKeys.get(u.id) || []).forEach((key) => {
-                const b = allBadges.find((x) => x.key === key);
-                if (!b) return;
-
-                const pill = document.createElement("span");
-                pill.className = "pill";
-                pill.append(makeIcon(b.icon), " " + b.label);
-                pill.style.color = b.color;
-                pill.style.borderColor = b.color;
-                badges.appendChild(pill);
-            });
-
-            info.append(name, handle, badges);
-
-            const actions = document.createElement("div");
-            actions.className = "admin-actions";
-
-            const open = document.createElement("button");
-            open.textContent = "Open profile";
-            open.addEventListener("click", () => openProfile(u.id));
-            actions.appendChild(open);
-
-            row.append(info, actions);
-            adminList.appendChild(row);
-        });
-}
-
-async function loadAdmin() {
-    if (!isOwner) return;
-
-    adminRooms.replaceChildren();
-
-    roomTabs.querySelectorAll(".room").forEach((r) => {
-        const button = document.createElement("button");
-        button.className = "room danger";
-        button.textContent = r.textContent;
-        button.addEventListener("click", () => clearRoom(r.dataset.room));
-        adminRooms.appendChild(button);
-    });
-
-    const [users, owned, msgCount, banCount] = await Promise.all([
-        db.from("profiles").select("id, username, display_name").order("username"),
-        db.from("user_badges").select("user_id, badge_key"),
-        db.from("messages").select("id", { count: "exact", head: true }),
-        db.from("bans").select("user_id", { count: "exact", head: true })
-    ]);
-
-    if (users.error) {
-        status.textContent = "Admin load failed: " + users.error.message;
+    if (answer !== user.username) {
+        if (answer !== null) status.textContent = "Username didn't match. Nothing was deleted.";
         return;
     }
 
-    adminUsers = users.data || [];
-    adminBadgeKeys = new Map();
+    // Uploads must be removed through the Storage API, not SQL
+    const { data: files } = await db.storage.from("avatars").list(user.id);
 
-    (owned.data || []).forEach((r) => {
-        if (!adminBadgeKeys.has(r.user_id)) adminBadgeKeys.set(r.user_id, []);
-        adminBadgeKeys.get(r.user_id).push(r.badge_key);
-    });
+    if (files && files.length) {
+        const { error: removeError } = await db.storage
+            .from("avatars")
+            .remove(files.map((f) => user.id + "/" + f.name));
 
-    adminStats.textContent =
-        "Users: " + adminUsers.length +
-        " · Public messages: " + (msgCount.count || 0) +
-        " · Banned: " + (banCount.count || 0);
+        if (removeError) {
+            status.textContent = "Could not delete uploads: " + removeError.message;
+            return;
+        }
+    }
 
-    renderAdminList();
+    const { error } = await db.rpc("admin_delete_user", { target: user.id });
+
+    if (error) {
+        status.textContent = "Account delete failed: " + error.message;
+        return;
+    }
+
+    profileCache.delete(user.id);
+    status.textContent = "Deleted @" + user.username + ".";
+    await loadMessages();
+    loadAdmin();
 }
 
 tabAdmin.addEventListener("click", () => {
@@ -1785,994 +1890,33 @@ tabAdmin.addEventListener("click", () => {
     loadAdmin();
 });
 
-adminRefresh.addEventListener("click", loadAdmin);
 adminSearch.addEventListener("input", renderAdminList);
+adminRefresh.addEventListener("click", loadAdmin);
 
-// =====================================================================
-// Heartbeat monitor (bottom-left ECG). heartbeat.spike() = big spike.
-// =====================================================================
+// ---------- Startup ----------
 
-const heartbeat = (function () {
-    const box = document.getElementById("heartbeatBox");
-    const canvas = document.getElementById("heartbeatCanvas");
-    const bpmEl = document.getElementById("heartbeatBpm");
-    const dot = document.getElementById("hbDot");
-    const ctx = canvas.getContext("2d");
+// Restore login when page opens
+async function startChat() {
+    listenForMessages();
 
-    const SPEED = 80; // trace pixels per second
+    const { data, error } = await db.auth.getSession();
 
-    let w = 150;
-    let h = 44;
-    let samples = [];
-    let colors = { fg: "#000000", line: "#dddddd" };
-    let bpm = 72;
-    let restBpm = 72;
-    let beatT = 0;
-    let period = 60 / 72;
-    let beatAmp = 1;
-    let queue = [];       // amplitudes of upcoming beats (used by big spikes)
-    let acc = 0;
-    let last = performance.now();
-    let shown = 0;
-    let spikeTimer = null;
-
-    function readColors() {
-        const cs = getComputedStyle(document.documentElement);
-        colors.fg = cs.getPropertyValue("--fg").trim() || "#000000";
-        colors.line = cs.getPropertyValue("--line").trim() || "#dddddd";
+    if (error) {
+        status.textContent = "Session error: " + error.message;
+        return;
     }
 
-    function resize() {
-        const dpr = window.devicePixelRatio || 1;
-        w = Math.max(40, Math.round(canvas.clientWidth));
-        h = Math.max(20, Math.round(canvas.clientHeight));
-        canvas.width = Math.round(w * dpr);
-        canvas.height = Math.round(h * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        samples = new Array(w).fill(0);
-    }
-
-    function gauss(p, center, width, amp) {
-        const d = p - center;
-        return amp * Math.exp(-(d * d) / (2 * width * width));
-    }
-
-    // One heartbeat (P, Q, R, S, T waves); p runs 0..1 across the beat
-    function wave(p, amp) {
-        return gauss(p, 0.14, 0.035, 0.12) +
-            gauss(p, 0.27, 0.014, -0.15 * amp) +
-            gauss(p, 0.30, 0.02, 1.0 * amp) +
-            gauss(p, 0.335, 0.016, -0.28 * amp) +
-            gauss(p, 0.58, 0.05, 0.22 + (amp > 1 ? 0.08 * (amp - 1) : 0));
-    }
-
-    function startBeat() {
-        beatT = 0;
-        period = 60 / Math.max(45, bpm);
-
-        if (queue.length) {
-            beatAmp = queue.shift();
-        } else if (Math.random() < 0.12) {
-            beatAmp = 1.4 + Math.random() * 0.3;   // small idle spike
-        } else {
-            beatAmp = 1 + (Math.random() - 0.5) * 0.1;
-        }
-
-        dot.classList.remove("beat");
-        void dot.offsetWidth;
-        dot.classList.add("beat");
-    }
-
-    function push(step) {
-        beatT += step;
-        if (beatT >= period) startBeat();
-
-        const value = wave(beatT / period, beatAmp) + (Math.random() - 0.5) * 0.015;
-        samples.push(value);
-        samples.shift();
-    }
-
-    function draw() {
-        const base = h * 0.72;
-        const unit = h * 0.22;
-
-        ctx.clearRect(0, 0, w, h);
-
-        // faint monitor grid
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = colors.line;
-        ctx.globalAlpha = 0.8;
-        ctx.beginPath();
-        for (let x = 0; x <= w; x += 15) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, h); }
-        for (let y = 0; y <= h; y += 11) { ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); }
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-
-        // the trace
-        ctx.strokeStyle = colors.fg;
-        ctx.fillStyle = colors.fg;
-        ctx.lineWidth = 1.6;
-        ctx.lineJoin = "round";
-        ctx.beginPath();
-
-        let lastY = base;
-
-        for (let i = 0; i < samples.length; i++) {
-            const y = Math.min(h - 1.5, Math.max(1.5, base - samples[i] * unit));
-            if (i === 0) ctx.moveTo(i + 0.5, y); else ctx.lineTo(i + 0.5, y);
-            lastY = y;
-        }
-
-        ctx.stroke();
-
-        // bright "head" at the newest sample
-        ctx.beginPath();
-        ctx.arc(samples.length - 1.5, lastY, 2, 0, Math.PI * 2);
-        ctx.fill();
-    }
-
-    function frame(now) {
-        requestAnimationFrame(frame);
-
-        const dt = Math.min(0.1, (now - last) / 1000);
-        last = now;
-
-        // heart rate eases back to its resting value after a spike
-        bpm += (restBpm - bpm) * Math.min(1, dt * 0.6);
-
-        acc += dt * SPEED;
-        while (acc >= 1) {
-            acc -= 1;
-            push(1 / SPEED);
-        }
-
-        draw();
-
-        const rounded = Math.round(bpm);
-        if (rounded !== shown) {
-            shown = rounded;
-            bpmEl.textContent = String(rounded);
-        }
-    }
-
-    // Big, noticeable spike (called when a Blir is collected)
-    function spike() {
-        queue = [2.7, 1.8, 1.4];             // big beat, then two aftershocks
-        bpm = 132 + Math.random() * 16;
-        beatT = period;                      // start the big beat right away
-
-        box.classList.remove("spike");
-        void box.offsetWidth;
-        box.classList.add("spike");
-
-        clearTimeout(spikeTimer);
-        spikeTimer = setTimeout(() => box.classList.remove("spike"), 2600);
-    }
-
-    readColors();
-    resize();
-    window.addEventListener("resize", resize);
-
-    new MutationObserver(readColors).observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ["data-theme"]
-    });
-
-    // resting heart rate drifts a little
-    setInterval(() => { restBpm = 66 + Math.random() * 14; }, 4000);
-
-    requestAnimationFrame(frame);
-
-    return { spike: spike };
-})();
-
-// =====================================================================
-// Blirs: collectibles, inventory, rewards, profile showcase
-// =====================================================================
-
-const RARITIES = ["common", "uncommon", "rare", "epic", "legendary", "mythic"];
-const RARITY_LABELS = {
-    common: "Common", uncommon: "Uncommon", rare: "Rare",
-    epic: "Epic", legendary: "Legendary", mythic: "Mythic"
-};
-const BLIR_ANIMATIONS = ["pop", "spin", "drop", "shake", "glitch", "glow", "float", "flip"];
-const SHOWCASE_MAX = 6;
-const QUEST_TARGET = 5;
-
-// Blir elements
-const blirTotalEl = document.getElementById("blirTotal");
-const blirUniqueEl = document.getElementById("blirUnique");
-const claimDailyButton = document.getElementById("claimDaily");
-const claimQuestButton = document.getElementById("claimQuest");
-const questProgressEl = document.getElementById("questProgress");
-const blirSearch = document.getElementById("blirSearch");
-const blirFilter = document.getElementById("blirFilter");
-const blirSort = document.getElementById("blirSort");
-const blirGrid = document.getElementById("blirGrid");
-const blirEmpty = document.getElementById("blirEmpty");
-
-const blirModal = document.getElementById("blirModal");
-const closeBlirModal = document.getElementById("closeBlirModal");
-const blirModalArt = document.getElementById("blirModalArt");
-const blirModalName = document.getElementById("blirModalName");
-const blirModalRarity = document.getElementById("blirModalRarity");
-const blirModalDesc = document.getElementById("blirModalDesc");
-const blirModalOwned = document.getElementById("blirModalOwned");
-const blirModalFirst = document.getElementById("blirModalFirst");
-const blirShowcaseToggle = document.getElementById("blirShowcaseToggle");
-
-const blirReveal = document.getElementById("blirReveal");
-const revealArtWrap = document.getElementById("revealArtWrap");
-const revealArt = document.getElementById("revealArt");
-const revealName = document.getElementById("revealName");
-const revealRarity = document.getElementById("revealRarity");
-const revealNote = document.getElementById("revealNote");
-const revealClose = document.getElementById("revealClose");
-const blirToasts = document.getElementById("blirToasts");
-
-const showcaseSection = document.getElementById("profileShowcase");
-const showcaseGrid = document.getElementById("showcaseGrid");
-const showcaseEditButton = document.getElementById("showcaseEditButton");
-const showcaseEditor = document.getElementById("showcaseEditor");
-const showcaseCount = document.getElementById("showcaseCount");
-const showcaseSlots = document.getElementById("showcaseSlots");
-const showcasePicker = document.getElementById("showcasePicker");
-const showcaseSaveButton = document.getElementById("showcaseSave");
-const showcaseCancelButton = document.getElementById("showcaseCancel");
-
-// ----- helpers -----
-
-function safeColor(value, fallback) {
-    return /^#[0-9a-f]{6}$/i.test(value || "") ? value : fallback;
+    await updateAccount(data.session);
 }
 
-function rarityRank(rarity) {
-    return Math.max(0, RARITIES.indexOf(rarity));
-}
-
-function rarityPill(rarity) {
-    const r = RARITIES.includes(rarity) ? rarity : "common";
-    const pill = document.createElement("span");
-    pill.className = "rarity r-" + r;
-    pill.textContent = RARITY_LABELS[r];
-    return pill;
-}
-
-function utcDay() {
-    return new Date().toISOString().slice(0, 10);
-}
-
-// Only images from your own Supabase storage or a relative file are trusted
-function trustedBlirImage(url) {
-    if (!url) return null;
-    if (url.startsWith(SUPABASE_URL + "/storage/")) return url;
-    if (/^[\w\-./]+\.(png|jpe?g|webp|gif|svg)$/i.test(url) && !url.startsWith("/") && !url.includes("..")) {
-        return url;
-    }
-    return null;
-}
-
-function svgEl(name, attrs) {
-    const el = document.createElementNS("http://www.w3.org/2000/svg", name);
-    Object.keys(attrs).forEach((k) => el.setAttribute(k, attrs[k]));
-    return el;
-}
-
-// Draws a Blir character from its id and colors
-function drawBlirSvg(b) {
-    const id = String((b && b.id) || "x");
-    let hash = 0;
-    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-
-    const color = safeColor(b && b.color, "#999999");
-    const accent = safeColor(b && b.accent, "#ffffff");
-    const shape = hash % 4;
-    const extra = (hash >> 3) % 3;
-    const mouth = (hash >> 5) % 3;
-    const body = { fill: color, stroke: "rgba(128,128,128,0.65)", "stroke-width": 3 };
-
-    const svg = svgEl("svg", {
-        viewBox: "0 0 100 100",
-        class: "blir-art",
-        role: "img",
-        "aria-label": (b && b.name) || "Blir"
-    });
-
-    if (extra === 1) {
-        svg.appendChild(svgEl("circle", Object.assign({ cx: 27, cy: 26, r: 10 }, body)));
-        svg.appendChild(svgEl("circle", Object.assign({ cx: 73, cy: 26, r: 10 }, body)));
-    } else if (extra === 2) {
-        svg.appendChild(svgEl("line", { x1: 50, y1: 22, x2: 50, y2: 8, stroke: "rgba(128,128,128,0.8)", "stroke-width": 3 }));
-        svg.appendChild(svgEl("circle", { cx: 50, cy: 7, r: 5, fill: accent, stroke: "rgba(128,128,128,0.65)", "stroke-width": 2 }));
-    }
-
-    if (shape === 0) {
-        svg.appendChild(svgEl("circle", Object.assign({ cx: 50, cy: 54, r: 35 }, body)));
-    } else if (shape === 1) {
-        svg.appendChild(svgEl("rect", Object.assign({ x: 18, y: 24, width: 64, height: 62, rx: 24 }, body)));
-    } else if (shape === 2) {
-        svg.appendChild(svgEl("ellipse", Object.assign({ cx: 50, cy: 54, rx: 31, ry: 37 }, body)));
-    } else {
-        svg.appendChild(svgEl("path", Object.assign({
-            d: "M20 86 L20 50 Q20 16 50 16 Q80 16 80 50 L80 86 Q70 78 60 86 Q50 78 40 86 Q30 78 20 86 Z",
-            "stroke-linejoin": "round"
-        }, body)));
-    }
-
-    // cheeks, eyes, mouth
-    svg.appendChild(svgEl("circle", { cx: 28, cy: 62, r: 5, fill: accent, opacity: 0.85 }));
-    svg.appendChild(svgEl("circle", { cx: 72, cy: 62, r: 5, fill: accent, opacity: 0.85 }));
-    svg.appendChild(svgEl("circle", { cx: 38, cy: 50, r: 8, fill: "#ffffff" }));
-    svg.appendChild(svgEl("circle", { cx: 62, cy: 50, r: 8, fill: "#ffffff" }));
-    svg.appendChild(svgEl("circle", { cx: 39, cy: 51, r: 4, fill: "#111111" }));
-    svg.appendChild(svgEl("circle", { cx: 63, cy: 51, r: 4, fill: "#111111" }));
-
-    if (mouth === 0) {
-        svg.appendChild(svgEl("path", { d: "M38 66 Q50 78 62 66", fill: "none", stroke: "#111111", "stroke-width": 3, "stroke-linecap": "round" }));
-    } else if (mouth === 1) {
-        svg.appendChild(svgEl("path", { d: "M42 69 L58 69", fill: "none", stroke: "#111111", "stroke-width": 3, "stroke-linecap": "round" }));
-    } else {
-        svg.appendChild(svgEl("circle", { cx: 50, cy: 70, r: 5, fill: "#111111" }));
-    }
-
-    return svg;
-}
-
-function blirArt(b) {
-    const url = trustedBlirImage(b && b.image_url);
-
-    if (url) {
-        const img = document.createElement("img");
-        img.className = "blir-art";
-        img.src = url;
-        img.alt = (b && b.name) || "Blir";
-        img.onerror = () => img.replaceWith(drawBlirSvg(b));
-        return img;
-    }
-
-    return drawBlirSvg(b);
-}
-
-function artWrap(b) {
-    const wrap = document.createElement("div");
-    wrap.className = "blir-art-wrap";
-    wrap.appendChild(blirArt(b));
-    return wrap;
-}
-
-// ----- the Blirs module -----
-
-const blirsApi = (function () {
-    let catalog = new Map();   // blir id -> definition
-    let owned = new Map();     // blir id -> { quantity, first_obtained_at, last_obtained_at }
-    let myShowcase = [];       // my showcased blir ids, in order
-    let claimedToday = new Set();
-    let messagesToday = 0;
-    let ready = false;
-    let busy = false;
-    let syncId = 0;
-    let editDraft = [];
-    let detailId = null;
-    let profileIsMine = false;
-
-    function me() {
-        return currentSession ? currentSession.user.id : null;
-    }
-
-    function explain(error) {
-        const m = (error && error.message) || String(error);
-
-        if (/schema cache|does not exist|Could not find the (table|function)/i.test(m)) {
-            return "Blirs aren't set up yet. Run the Blir SQL in Supabase.";
-        }
-
-        return m;
-    }
-
-    function fail(prefix, error) {
-        console.error(prefix, error);
-        status.textContent = prefix + ": " + explain(error);
-    }
-
-    // ----- loading -----
-
-    async function loadCatalog() {
-        const { data, error } = await db
-            .from("blirs")
-            .select("id, name, rarity, description, image_url, color, accent, animation, sort_order")
-            .order("sort_order");
-
-        if (error) {
-            fail("Could not load Blirs", error);
-            return false;
-        }
-
-        catalog = new Map(data.map((b) => [b.id, b]));
-        return true;
-    }
-
-    async function loadInventory() {
-        const uid = me();
-        if (!uid) return false;
-
-        const { data, error } = await db
-            .from("user_blirs")
-            .select("blir_id, quantity, first_obtained_at, last_obtained_at")
-            .eq("user_id", uid);
-
-        if (error) {
-            fail("Could not load your inventory", error);
-            return false;
-        }
-
-        if (uid !== me()) return false;
-        owned = new Map(data.map((r) => [r.blir_id, r]));
-        return true;
-    }
-
-    async function fetchShowcase(userId) {
-        const { data, error } = await db
-            .from("blir_showcase")
-            .select("blir_id, slot")
-            .eq("user_id", userId)
-            .order("slot");
-
-        if (error) {
-            fail("Could not load showcase", error);
-            return null;
-        }
-
-        return data.map((r) => r.blir_id);
-    }
-
-    async function refreshRewards() {
-        const uid = me();
-        if (!uid) return;
-
-        const day = utcDay();
-
-        const [claims, count] = await Promise.all([
-            db.from("blir_claims").select("source").eq("user_id", uid).eq("claim_day", day),
-            db.from("messages")
-                .select("id", { count: "exact", head: true })
-                .eq("user_id", uid)
-                .gte("created_at", day + "T00:00:00Z")
-        ]);
-
-        if (uid !== me()) return;
-
-        if (!claims.error) claimedToday = new Set(claims.data.map((r) => r.source));
-        if (!count.error) messagesToday = count.count || 0;
-
-        renderRewards();
-    }
-
-    // ----- rendering: inventory -----
-
-    function renderRewards() {
-        const dailyDone = claimedToday.has("daily");
-        const questDone = claimedToday.has("chat_quest");
-
-        claimDailyButton.disabled = !ready || busy || dailyDone;
-        claimDailyButton.textContent = dailyDone ? "Daily Blir claimed ✓" : "Claim daily Blir";
-
-        questProgressEl.textContent =
-            "Send " + QUEST_TARGET + " chat messages today: " +
-            Math.min(messagesToday, QUEST_TARGET) + "/" + QUEST_TARGET;
-
-        claimQuestButton.disabled = !ready || busy || questDone || messagesToday < QUEST_TARGET;
-        claimQuestButton.textContent = questDone ? "Quest Blir claimed ✓" : "Claim quest Blir";
-    }
-
-    function renderInventory() {
-        let total = 0;
-        owned.forEach((row) => { total += row.quantity; });
-
-        blirTotalEl.textContent = String(total);
-        blirUniqueEl.textContent = owned.size + " / " + catalog.size;
-
-        const filter = blirFilter.value;
-        const q = blirSearch.value.trim().toLowerCase();
-
-        let list = [];
-        owned.forEach((row, id) => {
-            const b = catalog.get(id);
-            if (b) list.push({ b: b, row: row });
-        });
-
-        list = list.filter((x) =>
-            (filter === "all" || x.b.rarity === filter) &&
-            (!q || x.b.name.toLowerCase().includes(q)));
-
-        const byName = (a, c) => a.b.name.localeCompare(c.b.name);
-        const sorters = {
-            "rarity-desc": (a, c) => rarityRank(c.b.rarity) - rarityRank(a.b.rarity) || byName(a, c),
-            "rarity-asc": (a, c) => rarityRank(a.b.rarity) - rarityRank(c.b.rarity) || byName(a, c),
-            "name": byName,
-            "qty": (a, c) => c.row.quantity - a.row.quantity || byName(a, c),
-            "recent": (a, c) => String(c.row.last_obtained_at).localeCompare(String(a.row.last_obtained_at))
-        };
-
-        list.sort(sorters[blirSort.value] || sorters["rarity-desc"]);
-
-        blirGrid.replaceChildren();
-        blirEmpty.hidden = list.length > 0;
-        blirEmpty.textContent = owned.size === 0
-            ? "You don't own any Blirs yet. Claim your daily Blir above!"
-            : "No Blirs match your search or filter.";
-
-        list.forEach((x) => {
-            const card = document.createElement("button");
-            card.className = "blir-card r-" + x.b.rarity;
-            card.title = x.b.name;
-
-            const qty = document.createElement("span");
-            qty.className = "qty";
-            qty.textContent = "×" + x.row.quantity;
-
-            const name = document.createElement("span");
-            name.className = "blir-name";
-            name.textContent = x.b.name;
-
-            card.append(qty, artWrap(x.b), name, rarityPill(x.b.rarity));
-            card.addEventListener("click", () => openDetail(x.b.id, true));
-            blirGrid.appendChild(card);
-        });
-    }
-
-    function renderAll() {
-        renderRewards();
-        renderInventory();
-    }
-
-    // ----- detail modal -----
-
-    function updateShowcaseToggle() {
-        const inShowcase = myShowcase.includes(detailId);
-
-        blirShowcaseToggle.textContent = inShowcase ? "Remove from showcase" : "Add to showcase";
-        blirShowcaseToggle.disabled = busy || (!inShowcase && myShowcase.length >= SHOWCASE_MAX);
-        blirShowcaseToggle.title = !inShowcase && myShowcase.length >= SHOWCASE_MAX
-            ? "Your showcase is full (" + SHOWCASE_MAX + ")"
-            : "";
-    }
-
-    function openDetail(id, mine) {
-        const b = catalog.get(id);
-        if (!b) return;
-
-        detailId = id;
-
-        blirModalArt.className = "detail-art r-" + b.rarity;
-        blirModalArt.replaceChildren(blirArt(b));
-        blirModalName.textContent = b.name;
-        blirModalRarity.replaceChildren(rarityPill(b.rarity));
-        blirModalDesc.textContent = b.description || "";
-
-        const row = owned.get(id);
-
-        blirModalOwned.hidden = !mine;
-        blirModalFirst.hidden = !mine;
-        blirShowcaseToggle.hidden = !mine || !row;
-
-        if (mine && row) {
-            blirModalOwned.textContent = "You own ×" + row.quantity;
-            blirModalFirst.textContent =
-                "First collected " + new Date(row.first_obtained_at).toLocaleDateString();
-        }
-
-        updateShowcaseToggle();
-        blirModal.hidden = false;
-    }
-
-    // ----- showcase (profile) -----
-
-    async function saveShowcase(ids) {
-        const { error } = await db.rpc("set_blir_showcase", { p_blir_ids: ids });
-
-        if (error) {
-            fail("Showcase not saved", error);
-            return false;
-        }
-
-        myShowcase = ids.slice();
-
-        if (!profileModal.hidden && viewedProfileId === me() && !showcaseEditor.hidden === false) {
-            renderShowcaseGrid(myShowcase, true);
-        }
-
-        status.textContent = "Showcase saved!";
-        return true;
-    }
-
-    function renderShowcaseGrid(ids, mine) {
-        showcaseGrid.replaceChildren();
-
-        ids.forEach((id) => {
-            const b = catalog.get(id);
-            if (!b) return;
-
-            const item = document.createElement("button");
-            item.className = "showcase-item r-" + b.rarity;
-            item.title = b.name + " (" + RARITY_LABELS[b.rarity] + ")";
-
-            const name = document.createElement("span");
-            name.textContent = b.name;
-
-            item.append(artWrap(b), name);
-            item.addEventListener("click", () => openDetail(id, mine));
-            showcaseGrid.appendChild(item);
-        });
-
-        if (!showcaseGrid.children.length) {
-            const empty = document.createElement("p");
-            empty.className = "showcase-empty";
-            empty.textContent = mine ? "Nothing showcased yet. Press Edit to pick up to 6 Blirs." : "";
-            showcaseGrid.appendChild(empty);
-        }
-    }
-
-    function slotButton(label, title, onClick, disabled) {
-        const button = document.createElement("button");
-        button.textContent = label;
-        button.title = title;
-        button.disabled = !!disabled;
-        button.addEventListener("click", onClick);
-        return button;
-    }
-
-    function renderEditor() {
-        showcaseCount.textContent = editDraft.length + " / " + SHOWCASE_MAX;
-        showcaseSlots.replaceChildren();
-
-        if (!editDraft.length) {
-            const hint = document.createElement("p");
-            hint.className = "showcase-empty";
-            hint.textContent = "Pick Blirs below to add them.";
-            showcaseSlots.appendChild(hint);
-        }
-
-        editDraft.forEach((id, i) => {
-            const b = catalog.get(id);
-            if (!b) return;
-
-            const row = document.createElement("div");
-            row.className = "showcase-slot r-" + b.rarity;
-
-            const name = document.createElement("span");
-            name.className = "blir-name";
-            name.textContent = b.name;
-
-            const move = (delta) => {
-                const j = i + delta;
-                if (j < 0 || j >= editDraft.length) return;
-                const tmp = editDraft[i];
-                editDraft[i] = editDraft[j];
-                editDraft[j] = tmp;
-                renderEditor();
-            };
-
-            row.append(
-                artWrap(b),
-                name,
-                slotButton("↑", "Move up", () => move(-1), i === 0),
-                slotButton("↓", "Move down", () => move(1), i === editDraft.length - 1),
-                slotButton("✕", "Remove", () => {
-                    editDraft.splice(i, 1);
-                    renderEditor();
-                })
-            );
-
-            showcaseSlots.appendChild(row);
-        });
-
-        // picker: everything I own that isn't already chosen
-        showcasePicker.replaceChildren();
-
-        const available = [];
-        owned.forEach((row, id) => {
-            const b = catalog.get(id);
-            if (b && !editDraft.includes(id)) available.push(b);
-        });
-
-        available.sort((a, c) => rarityRank(c.rarity) - rarityRank(a.rarity) || a.name.localeCompare(c.name));
-
-        if (!owned.size) {
-            const none = document.createElement("p");
-            none.className = "showcase-empty";
-            none.textContent = "You don't own any Blirs yet.";
-            showcasePicker.appendChild(none);
-        }
-
-        available.forEach((b) => {
-            const mini = document.createElement("button");
-            mini.className = "blir-mini r-" + b.rarity;
-            mini.title = b.name + " (" + RARITY_LABELS[b.rarity] + ")";
-
-            const name = document.createElement("span");
-            name.textContent = b.name;
-
-            mini.append(artWrap(b), name);
-            mini.addEventListener("click", () => {
-                if (editDraft.length >= SHOWCASE_MAX) {
-                    status.textContent = "Your showcase is full (" + SHOWCASE_MAX + "). Remove one first.";
-                    return;
-                }
-
-                editDraft.push(b.id);
-                renderEditor();
-            });
-
-            showcasePicker.appendChild(mini);
-        });
-    }
-
-    function openEditor() {
-        editDraft = myShowcase.filter((id) => owned.has(id));
-        showcaseEditor.hidden = false;
-        showcaseGrid.hidden = true;
-        showcaseEditButton.hidden = true;
-        renderEditor();
-    }
-
-    function closeEditor() {
-        showcaseEditor.hidden = true;
-        showcaseGrid.hidden = false;
-        showcaseEditButton.hidden = !profileIsMine;
-    }
-
-    function resetProfileView() {
-        profileIsMine = false;
-        showcaseSection.hidden = true;
-        showcaseEditor.hidden = true;
-        showcaseGrid.hidden = false;
-        showcaseEditButton.hidden = true;
-        showcaseGrid.replaceChildren();
-    }
-
-    async function showProfile(userId, isMine) {
-        if (!currentSession) return;
-
-        profileIsMine = isMine;
-
-        if (catalog.size === 0) await loadCatalog();
-        if (viewedProfileId !== userId) return;
-
-        const ids = await fetchShowcase(userId);
-        if (viewedProfileId !== userId || ids === null) return;
-
-        if (isMine) myShowcase = ids.slice();
-
-        renderShowcaseGrid(ids, isMine);
-        showcaseEditButton.hidden = !isMine;
-        showcaseSection.hidden = !isMine && ids.length === 0;
-    }
-
-    // ----- collecting -----
-
-    function toast(b, text) {
-        const el = document.createElement("div");
-        el.className = "blir-toast r-" + b.rarity;
-
-        const label = document.createElement("div");
-        const strong = document.createElement("strong");
-        strong.textContent = b.name;
-        label.append(strong, document.createElement("br"), text + " · " + RARITY_LABELS[b.rarity]);
-
-        el.append(artWrap(b), label);
-        blirToasts.appendChild(el);
-
-        setTimeout(() => el.remove(), 5500);
-    }
-
-    function announce(b, quantity, isNew) {
-        heartbeat.spike(); // the big heartbeat spike
-
-        const anim = BLIR_ANIMATIONS.includes(b.animation) ? b.animation : "pop";
-
-        revealArt.className = "reveal-art";
-        revealArt.replaceChildren(blirArt(b));
-        revealArtWrap.className = "reveal-art-wrap r-" + b.rarity;
-        revealArtWrap.style.setProperty("--rings", String(rarityRank(b.rarity) + 1));
-        void revealArt.offsetWidth; // restart the animation
-        revealArt.classList.add("anim-" + anim);
-
-        revealName.textContent = b.name;
-        revealRarity.replaceChildren(rarityPill(b.rarity));
-        revealNote.textContent = isNew
-            ? "New Blir added to your collection!"
-            : "You now own ×" + quantity;
-
-        blirReveal.hidden = false;
-
-        toast(b, isNew ? "New Blir collected" : "Collected ×" + quantity);
-        status.textContent = "Collected " + b.name + " (" + RARITY_LABELS[b.rarity] + ")!";
-    }
-
-    async function claim(source) {
-        if (busy || !ready) return;
-
-        busy = true;
-        renderRewards();
-
-        const { data, error } = await db.rpc("claim_blir", { p_source: source });
-
-        busy = false;
-
-        if (error) {
-            fail("Claim failed", error);
-            await refreshRewards();
-            return;
-        }
-
-        const b = data && data.blir;
-
-        if (!b) {
-            status.textContent = "Claim failed: unexpected response.";
-            await refreshRewards();
-            return;
-        }
-
-        const existing = owned.get(b.id);
-        const now = new Date().toISOString();
-
-        catalog.set(b.id, b);
-        owned.set(b.id, {
-            blir_id: b.id,
-            quantity: data.quantity,
-            first_obtained_at: existing ? existing.first_obtained_at : now,
-            last_obtained_at: now
-        });
-        claimedToday.add(source);
-
-        renderAll();
-        announce(b, data.quantity, !!data.is_new);
-    }
-
-    // ----- events (all attached once) -----
-
-    claimDailyButton.addEventListener("click", () => claim("daily"));
-    claimQuestButton.addEventListener("click", () => claim("chat_quest"));
-
-    blirFilter.addEventListener("change", renderInventory);
-    blirSort.addEventListener("change", renderInventory);
-    blirSearch.addEventListener("input", renderInventory);
-
-    closeBlirModal.addEventListener("click", () => { blirModal.hidden = true; });
-    blirModal.addEventListener("click", (event) => {
-        if (event.target === blirModal) blirModal.hidden = true;
-    });
-
-    revealClose.addEventListener("click", () => { blirReveal.hidden = true; });
-    blirReveal.addEventListener("click", (event) => {
-        if (event.target === blirReveal) blirReveal.hidden = true;
-    });
-
-    document.addEventListener("keydown", (event) => {
-        if (event.key !== "Escape") return;
-        if (!blirReveal.hidden) blirReveal.hidden = true;
-        else if (!blirModal.hidden) blirModal.hidden = true;
-    });
-
-    blirShowcaseToggle.addEventListener("click", async () => {
-        if (!detailId || !owned.has(detailId)) return;
-
-        const next = myShowcase.includes(detailId)
-            ? myShowcase.filter((id) => id !== detailId)
-            : myShowcase.concat(detailId);
-
-        if (next.length > SHOWCASE_MAX) return;
-
-        busy = true;
-        blirShowcaseToggle.disabled = true;
-
-        await saveShowcase(next);
-
-        busy = false;
-        updateShowcaseToggle();
-
-        if (!profileModal.hidden && viewedProfileId === me()) {
-            renderShowcaseGrid(myShowcase, true);
-        }
-    });
-
-    showcaseEditButton.addEventListener("click", openEditor);
-    showcaseCancelButton.addEventListener("click", closeEditor);
-
-    showcaseSaveButton.addEventListener("click", async () => {
-        showcaseSaveButton.disabled = true;
-
-        const ok = await saveShowcase(editDraft);
-
-        showcaseSaveButton.disabled = false;
-
-        if (ok) {
-            closeEditor();
-            renderShowcaseGrid(myShowcase, true);
-        }
-    });
-
-    // ----- public API -----
-
-    function closeEverything() {
-        blirModal.hidden = true;
-        blirReveal.hidden = true;
-        blirToasts.replaceChildren();
-        resetProfileView();
-    }
-
-    async function sync(session) {
-        const token = ++syncId;
-
-        ready = false;
-        busy = false;
-        catalog = new Map();
-        owned = new Map();
-        myShowcase = [];
-        claimedToday = new Set();
-        messagesToday = 0;
-        detailId = null;
-
-        closeEverything();
-        renderAll();
-
-        if (!session) return;
-
-        const uid = session.user.id;
-        const [, , showcase] = await Promise.all([
-            loadCatalog(),
-            loadInventory(),
-            fetchShowcase(uid)
-        ]);
-
-        if (token !== syncId) return;
-
-        myShowcase = showcase || [];
-        ready = true;
-
-        renderAll();
-        await refreshRewards();
-    }
-
-    // Called when one of my own chat messages arrives (counts toward the quest)
-    function countMessage() {
-        if (!ready) return;
-        messagesToday += 1;
-        renderRewards();
-    }
-
-    // Called when the Blirs tab opens
-    async function open() {
-        renderAll();
-        if (!ready) return;
-
-        await Promise.all([loadInventory(), refreshRewards()]);
-        renderAll();
-    }
-
-    return {
-        sync: sync,
-        countMessage: countMessage,
-        open: open,
-        showProfile: showProfile,
-        resetProfileView: resetProfileView
-    };
-})();
-
-tabBlirs.addEventListener("click", () => {
-    switchPanel("blirs");
-    blirsApi.open();
-});
-
-// =====================================================================
-// RESTORED: app startup (your pasted file ended before this existed).
-// If your real script.js already starts the app, keep yours instead.
-// =====================================================================
-
-// Fires once with the saved session (INITIAL_SESSION) and again on every sign in / out.
-// Supabase calls are deferred so they don't run inside the auth callback itself.
+// Listen for login/logout changes.
+// Don't await Supabase calls inside this callback (can deadlock), so the
+// work is deferred with setTimeout. updateAccount also ignores repeat
+// SIGNED_IN events for a user who is already loaded.
 db.auth.onAuthStateChange((event, session) => {
-    setTimeout(() => updateAccount(session), 0);
+    if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+        setTimeout(() => updateAccount(session), 0);
+    }
 });
 
-listenForMessages();
+startChat();
