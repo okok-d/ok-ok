@@ -7,6 +7,7 @@
     <title>My Chat</title>
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
 
     <header>
@@ -15,11 +16,21 @@
     </header>
 
     <main>
+
         <div id="messages">
             <p>Loading messages...</p>
         </div>
 
         <div class="input-area">
+
+            <input
+                id="username"
+                type="text"
+                maxlength="20"
+                placeholder="Username"
+                autocomplete="off"
+            >
+
             <input
                 id="message"
                 type="text"
@@ -27,12 +38,15 @@
                 placeholder="Write a message..."
                 autocomplete="off"
             >
+
             <button id="sendButton" onclick="sendMessage()">
                 Send
             </button>
+
         </div>
 
         <p id="status">Connecting...</p>
+
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
