@@ -193,11 +193,11 @@ const adminSearch = document.getElementById("adminSearch");
 const adminRefresh = document.getElementById("adminRefresh");
 const adminList = document.getElementById("adminList");
 
-// Digits 0-9 are allowed
+// FIX: digits 0-9 are now allowed (the old pattern skipped 0)
 const usernamePattern = /^[a-z0-9_]{1,20}$/;
 
 let currentSession = null;
-let loadedUserId = null; // the user whose chat is currently loaded
+let loadedUserId = null; // FIX: the user whose chat is currently loaded
 let chatChannel = null;
 let activeRoom = "goldfish";
 
@@ -210,7 +210,7 @@ let allBadges = [];
 const REACTION_EMOJIS = ["👍", "😂", "🔥", "😮", "😢", "💯"];
 const reactionsByMsg = new Map(); // message id -> [{ user_id, emoji }]
 const reactionBars = new Map();   // message id -> reactions element
-const shownMessages = new Set();  // public message ids already on screen
+const shownMessages = new Set();  // FIX: public message ids already on screen
 
 // ---------- Dark mode ----------
 
@@ -291,7 +291,7 @@ signupButton.addEventListener("click", async () => {
         return;
     }
 
-    // onAuthStateChange handles SIGNED_IN
+    // FIX: no explicit updateAccount here; onAuthStateChange handles SIGNED_IN
     if (data.session) {
         status.textContent = "Account created!";
     } else {
@@ -320,7 +320,7 @@ loginButton.addEventListener("click", async () => {
         return;
     }
 
-    // onAuthStateChange handles SIGNED_IN
+    // FIX: no explicit updateAccount here; onAuthStateChange handles SIGNED_IN
 });
 
 // Log out
@@ -349,7 +349,7 @@ async function updateAccount(session) {
         return;
     }
 
-    // Skip if this user's chat is already loaded (tab refocus re-fires SIGNED_IN)
+    // FIX: skip if this user's chat is already loaded (tab refocus re-fires SIGNED_IN)
     if (loadedUserId === session.user.id) return;
     loadedUserId = session.user.id;
 
@@ -652,15 +652,23 @@ async function saveProfile() {
         updates.banner_url = bannerUrl;
     }
 
-    const { error } = await db
+    const { data: saved, error } = await db
         .from("profiles")
         .update(updates)
-        .eq("id", userId);
+        .eq("id", userId)
+        .select("id");
 
     saveProfileButton.disabled = false;
 
     if (error) {
         status.textContent = "Save failed: " + error.message;
+        return;
+    }
+
+    // An update blocked by row-level security succeeds silently with 0 rows
+    if (!saved || saved.length === 0) {
+        status.textContent =
+            "Save was blocked: the database didn't let you update your profile row. Check the profiles update policy.";
         return;
     }
 
@@ -946,7 +954,7 @@ function applyReaction(r, added) {
 
 // Display a message
 function displayMessage(msg) {
-    // Don't show the same message twice (realtime vs. loadMessages race)
+    // FIX: don't show the same message twice (realtime vs. loadMessages race)
     if (shownMessages.has(msg.id)) return;
     shownMessages.add(msg.id);
 
@@ -1697,8 +1705,8 @@ async function startChat() {
 }
 
 // Listen for login/logout changes.
-// Don't await Supabase calls inside this callback (can deadlock), so the
-// work is deferred with setTimeout. updateAccount also ignores repeat
+// FIX: don't await Supabase calls inside this callback (can deadlock), so
+// the work is deferred with setTimeout. updateAccount also ignores repeat
 // SIGNED_IN events for a user who is already loaded.
 db.auth.onAuthStateChange((event, session) => {
     if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
