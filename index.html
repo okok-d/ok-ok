@@ -112,6 +112,7 @@
                     Direct messages
                     <span id="dmBadge" class="badge" hidden></span>
                 </button>
+                <button id="tabAdmin" class="tab" hidden>Admin</button>
             </div>
 
             <!-- Public chat -->
@@ -170,6 +171,26 @@
                     </div>
                 </div>
 
+            </div>
+
+            <!-- Admin panel (owner only) -->
+            <div id="adminPanel" hidden>
+                <div id="adminStats" class="admin-stats"></div>
+
+                <div class="field-label">Clear a room (deletes every message in it)</div>
+                <div id="adminRooms" class="rooms"></div>
+
+                <div class="input-area">
+                    <input
+                        id="adminSearch"
+                        type="text"
+                        placeholder="Search users..."
+                        autocomplete="off"
+                    >
+                    <button id="adminRefresh">Refresh</button>
+                </div>
+
+                <div id="adminList"></div>
             </div>
 
         </section>
