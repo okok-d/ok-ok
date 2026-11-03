@@ -1,9 +1,9 @@
 
 const SUPABASE_URL = "https://xsehbpikhmofqjeandey.supabase.co";
+const SUPABASE_KEY = "YOUR_PUBLISHABLE_KEY";
 
-const SUPABASE_KEY = "sb_publishable_bC53WFgEwu4NDllgbYqjUQ_eCMcG3vl";
-
-const supabase = window.supabase.createClient(
+// Connect to Supabase
+const db = window.supabase.createClient(
     SUPABASE_URL,
     SUPABASE_KEY
 );
@@ -13,8 +13,7 @@ const input = document.getElementById("message");
 const button = document.getElementById("sendButton");
 const status = document.getElementById("status");
 
-let channel;
-
+// Display a message
 function displayMessage(msg) {
     const item = document.createElement("div");
     item.className = "message";
@@ -32,14 +31,16 @@ function displayMessage(msg) {
     messages.scrollTop = messages.scrollHeight;
 }
 
+// Load existing messages
 async function loadMessages() {
-    const { data, error } = await supabase
+    const { data, error } = await db
         .from("messages")
         .select("*")
         .order("created_at", { ascending: true });
 
     if (error) {
         status.textContent = "Error loading messages: " + error.message;
+        console.error(error);
         return;
     }
 
@@ -48,14 +49,15 @@ async function loadMessages() {
     data.forEach(displayMessage);
 }
 
-async function sendMessage() {
+// Send a message
+window.sendMessage = async function () {
     const content = input.value.trim();
 
     if (!content || content.length > 1000) return;
 
     button.disabled = true;
 
-    const { error } = await supabase
+    const { error } = await db
         .from("messages")
         .insert({
             username: "Guest",
@@ -64,17 +66,18 @@ async function sendMessage() {
 
     if (error) {
         status.textContent = "Message failed: " + error.message;
+        console.error(error);
     } else {
         input.value = "";
     }
 
     button.disabled = false;
     input.focus();
-}
+};
 
+// Listen for new messages
 function listenForMessages() {
-    channel = supabase
-        .channel("chat-room")
+    db.channel("chat-room")
         .on(
             "postgres_changes",
             {
@@ -86,21 +89,29 @@ function listenForMessages() {
                 displayMessage(payload.new);
             }
         )
-        .subscribe((state) => {
+        .subscribe((state, err) => {
+            console.log("Supabase:", state, err);
+
             if (state === "SUBSCRIBED") {
                 status.textContent = "Connected to chat!";
-            } else if (state === "CHANNEL_ERROR") {
-                status.textContent = "Live connection failed.";
+            } else if (
+                state === "CHANNEL_ERROR" ||
+                state === "TIMED_OUT" ||
+                state === "CLOSED"
+            ) {
+                status.textContent = "Connection issue: " + state;
             }
         });
 }
 
+// Allow Enter to send
 input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
-        sendMessage();
+        window.sendMessage();
     }
 });
 
+// Start everything
 async function startChat() {
     await loadMessages();
     listenForMessages();
