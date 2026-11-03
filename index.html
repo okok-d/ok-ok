@@ -4,14 +4,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>okok</title>
+
+    <!-- Apply saved theme before paint to avoid a flash -->
+    <script>
+        try {
+            var saved = localStorage.getItem("theme");
+            var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+            document.documentElement.dataset.theme = saved || (dark ? "dark" : "light");
+        } catch (e) {
+            document.documentElement.dataset.theme = "light";
+        }
+    </script>
+
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
     <header>
-        <h1>OkOK</h1>
-        <p>OkOk</p>
+        <div>
+            <h1>OkOK</h1>
+            <p>OkOk</p>
+        </div>
+        <button id="themeToggle">🌙 Dark</button>
     </header>
 
     <main>
@@ -88,20 +103,62 @@
                 <button id="logoutButton">Log out</button>
             </div>
 
-            <div id="messages">
-                <p>Loading messages...</p>
+            <div class="tabs">
+                <button id="tabPublic" class="tab active">Public chat</button>
+                <button id="tabDMs" class="tab">
+                    Direct messages
+                    <span id="dmBadge" class="badge" hidden></span>
+                </button>
             </div>
 
-            <div class="input-area">
-                <input
-                    id="message"
-                    type="text"
-                    maxlength="1000"
-                    placeholder="Write a message..."
-                    autocomplete="off"
-                >
+            <!-- Public chat -->
+            <div id="publicPanel">
+                <div id="messages">
+                    <p>Loading messages...</p>
+                </div>
 
-                <button id="sendButton">Send</button>
+                <div class="input-area">
+                    <input
+                        id="message"
+                        type="text"
+                        maxlength="1000"
+                        placeholder="Write a message..."
+                        autocomplete="off"
+                    >
+
+                    <button id="sendButton">Send</button>
+                </div>
+            </div>
+
+            <!-- Direct messages -->
+            <div id="dmPanel" hidden>
+
+                <div id="dmListView">
+                    <div id="dmList"></div>
+                </div>
+
+                <div id="dmChatView" hidden>
+                    <div class="dm-header">
+                        <button id="dmBack">← Back</button>
+                        <div id="dmHeaderAvatar" class="avatar"></div>
+                        <strong id="dmHeaderName"></strong>
+                    </div>
+
+                    <div id="dmMessages"></div>
+
+                    <div class="input-area">
+                        <input
+                            id="dmInput"
+                            type="text"
+                            maxlength="1000"
+                            placeholder="Write a private message..."
+                            autocomplete="off"
+                        >
+
+                        <button id="dmSendButton">Send</button>
+                    </div>
+                </div>
+
             </div>
 
         </section>
@@ -119,11 +176,13 @@
             <h2 id="profileName"></h2>
             <p id="profileBio"></p>
 
+            <button id="messageButton" hidden>Message</button>
+
             <div id="profileEdit" hidden>
                 <input
                     id="avatarFile"
                     type="file"
-                    accept="image/png,image/jpeg,image/webp"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
                 >
 
                 <textarea
