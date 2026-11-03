@@ -1,8 +1,8 @@
 
 const SUPABASE_URL = "https://xsehbpikhmofqjeandey.supabase.co";
-const SUPABASE_KEY = "sb_publishable_bC53WFgEwu4NDllgbYqjUQ_eCMcG3vl";
 
-// Connect to Supabase
+const SUPABASE_KEY = "YOUR_PUBLISHABLE_KEY";
+
 const db = window.supabase.createClient(
     SUPABASE_URL,
     SUPABASE_KEY
@@ -10,10 +10,17 @@ const db = window.supabase.createClient(
 
 const messages = document.getElementById("messages");
 const input = document.getElementById("message");
+const usernameInput = document.getElementById("username");
 const button = document.getElementById("sendButton");
 const status = document.getElementById("status");
 
-// Display a message
+// Username rules
+const usernamePattern = /^[a-z1-9_]{1,20}$/;
+
+// Remember username on this browser
+usernameInput.value = localStorage.getItem("chatUsername") || "";
+
+// Display messages
 function displayMessage(msg) {
     const item = document.createElement("div");
     item.className = "message";
@@ -31,7 +38,7 @@ function displayMessage(msg) {
     messages.scrollTop = messages.scrollHeight;
 }
 
-// Load existing messages
+// Load old messages
 async function loadMessages() {
     const { data, error } = await db
         .from("messages")
@@ -39,7 +46,7 @@ async function loadMessages() {
         .order("created_at", { ascending: true });
 
     if (error) {
-        status.textContent = "Error loading messages: " + error.message;
+        status.textContent = "Error: " + error.message;
         console.error(error);
         return;
     }
@@ -51,16 +58,26 @@ async function loadMessages() {
 
 // Send a message
 window.sendMessage = async function () {
+    const username = usernameInput.value.trim();
     const content = input.value.trim();
 
-    if (!content || content.length > 1000) return;
+    if (!usernamePattern.test(username)) {
+        status.textContent =
+            "Username must be 1-20 characters: a-z, 1-9, or _";
+        return;
+    }
+
+    if (!content || content.length > 1000) {
+        status.textContent = "Enter a valid message.";
+        return;
+    }
 
     button.disabled = true;
 
     const { error } = await db
         .from("messages")
         .insert({
-            username: "Guest",
+            username: username,
             content: content
         });
 
@@ -68,7 +85,9 @@ window.sendMessage = async function () {
         status.textContent = "Message failed: " + error.message;
         console.error(error);
     } else {
+        localStorage.setItem("chatUsername", username);
         input.value = "";
+        status.textContent = "Message sent!";
     }
 
     button.disabled = false;
@@ -89,8 +108,8 @@ function listenForMessages() {
                 displayMessage(payload.new);
             }
         )
-        .subscribe((state, err) => {
-            console.log("Supabase:", state, err);
+        .subscribe((state) => {
+            console.log("Supabase:", state);
 
             if (state === "SUBSCRIBED") {
                 status.textContent = "Connected to chat!";
@@ -104,14 +123,14 @@ function listenForMessages() {
         });
 }
 
-// Allow Enter to send
+// Enter sends message
 input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
         window.sendMessage();
     }
 });
 
-// Start everything
+// Start chat
 async function startChat() {
     await loadMessages();
     listenForMessages();
