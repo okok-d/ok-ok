@@ -184,9 +184,11 @@ const modSection = document.getElementById("modSection");
 const badgeManager = document.getElementById("badgeManager");
 const banButton = document.getElementById("banButton");
 
-const usernamePattern = /^[a-z1-9_]{1,20}$/;
+// FIX: digits 0-9 are now allowed (the old pattern skipped 0)
+const usernamePattern = /^[a-z0-9_]{1,20}$/;
 
 let currentSession = null;
+let loadedUserId = null; // FIX: the user whose chat is currently loaded
 let chatChannel = null;
 let activeRoom = "goldfish";
 
@@ -199,6 +201,7 @@ let allBadges = [];
 const REACTION_EMOJIS = ["👍", "😂", "🔥", "😮", "😢", "💯"];
 const reactionsByMsg = new Map(); // message id -> [{ user_id, emoji }]
 const reactionBars = new Map();   // message id -> reactions element
+const shownMessages = new Set();  // FIX: public message ids already on screen
 
 // ---------- Dark mode ----------
 
@@ -243,13 +246,14 @@ document.getElementById("showSignup").addEventListener("click", (event) => {
 
 // Create account
 signupButton.addEventListener("click", async () => {
-    const username = signupUsername.value.trim();
+    // Lowercase first so "Sdf" works as "sdf"
+    const username = signupUsername.value.trim().toLowerCase();
     const email = signupEmail.value.trim();
     const password = signupPassword.value;
 
     if (!usernamePattern.test(username)) {
         status.textContent =
-            "Username must be 1-20 characters: a-z, 1-9, or _";
+            "Username must be 1-20 characters: a-z, 0-9, or _";
         return;
     }
 
@@ -278,9 +282,9 @@ signupButton.addEventListener("click", async () => {
         return;
     }
 
+    // FIX: no explicit updateAccount here; onAuthStateChange handles SIGNED_IN
     if (data.session) {
         status.textContent = "Account created!";
-        await updateAccount(data.session);
     } else {
         status.textContent =
             "Check your email to confirm your account, then log in.";
@@ -295,7 +299,7 @@ loginButton.addEventListener("click", async () => {
     loginButton.disabled = true;
     status.textContent = "Logging in...";
 
-    const { data, error } = await db.auth.signInWithPassword({
+    const { error } = await db.auth.signInWithPassword({
         email: email,
         password: password
     });
@@ -307,7 +311,7 @@ loginButton.addEventListener("click", async () => {
         return;
     }
 
-    await updateAccount(data.session);
+    // FIX: no explicit updateAccount here; onAuthStateChange handles SIGNED_IN
 });
 
 // Log out
@@ -319,11 +323,7 @@ logoutButton.addEventListener("click", async () => {
         return;
     }
 
-    currentSession = null;
-    profileModal.hidden = true;
-    resetDMs();
-    authArea.hidden = false;
-    chatArea.hidden = true;
+    // onAuthStateChange (SIGNED_OUT) resets the screen
     status.textContent = "Logged out.";
 });
 
@@ -332,11 +332,17 @@ async function updateAccount(session) {
     currentSession = session;
 
     if (!session) {
+        loadedUserId = null;
+        profileModal.hidden = true;
         resetDMs();
         authArea.hidden = false;
         chatArea.hidden = true;
         return;
     }
+
+    // FIX: skip if this user's chat is already loaded (tab refocus re-fires SIGNED_IN)
+    if (loadedUserId === session.user.id) return;
+    loadedUserId = session.user.id;
 
     authArea.hidden = true;
     chatArea.hidden = false;
@@ -348,6 +354,7 @@ async function updateAccount(session) {
         .single();
 
     if (error) {
+        loadedUserId = null; // allow a retry
         status.textContent = "Profile error: " + error.message;
         console.error(error);
         return;
@@ -806,6 +813,7 @@ function removeMessage(id) {
     const el = messages.querySelector('.message[data-id="' + CSS.escape(String(id)) + '"]');
     if (el) el.remove();
 
+    shownMessages.delete(id);
     reactionBars.delete(id);
     reactionsByMsg.delete(id);
 }
@@ -893,6 +901,10 @@ function applyReaction(r, added) {
 
 // Display a message
 function displayMessage(msg) {
+    // FIX: don't show the same message twice (realtime vs. loadMessages race)
+    if (shownMessages.has(msg.id)) return;
+    shownMessages.add(msg.id);
+
     const item = document.createElement("div");
     item.className = "message";
     item.dataset.id = msg.id;
@@ -985,6 +997,7 @@ async function loadMessages() {
 
     reactionsByMsg.clear();
     reactionBars.clear();
+    shownMessages.clear();
     messages.replaceChildren();
     data.forEach(displayMessage);
 }
@@ -1018,7 +1031,7 @@ async function sendMessage() {
         status.textContent = "Message sent!";
     }
 
-    sendButton.disabled = false;
+    sendButton.disabled = isBanned;
     input.focus();
 }
 
@@ -1060,6 +1073,7 @@ function listenForMessages() {
         .on(
             "postgres_changes",
             { event: "DELETE", schema: "public", table: "message_reactions" },
+            // Needs: alter table message_reactions replica identity full;
             (payload) => applyReaction(payload.old, false)
         )
         .subscribe((state) => {
@@ -1093,6 +1107,7 @@ roomTabs.addEventListener("click", (event) => {
 
     input.placeholder = "Message #" + activeRoom + "...";
     messages.replaceChildren();
+    shownMessages.clear();
     loadMessages();
 });
 
@@ -1295,7 +1310,7 @@ async function sendDM() {
         .select()
         .single();
 
-    dmSendButton.disabled = false;
+    dmSendButton.disabled = isBanned;
 
     if (error) {
         status.textContent = postError(error);
@@ -1392,10 +1407,13 @@ async function startChat() {
     await updateAccount(data.session);
 }
 
-// Listen for login/logout changes
+// Listen for login/logout changes.
+// FIX: don't await Supabase calls inside this callback (can deadlock), so
+// the work is deferred with setTimeout. updateAccount also ignores repeat
+// SIGNED_IN events for a user who is already loaded.
 db.auth.onAuthStateChange((event, session) => {
     if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
-        updateAccount(session);
+        setTimeout(() => updateAccount(session), 0);
     }
 });
 
