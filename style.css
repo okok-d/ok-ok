@@ -519,3 +519,22 @@ select {
     color: #e53935;
     border-color: #e53935;
 }
+
+/* Icons (cut from icons.png; they take the text color of whatever they sit in) */
+.icon {
+    display: inline-block;
+    width: 1.15em;
+    height: 1.15em;
+    vertical-align: -0.2em;
+    background-color: currentColor;
+    -webkit-mask-image: url("icons.png");
+    mask-image: url("icons.png");
+    -webkit-mask-size: 1600% 600%;
+    mask-size: 1600% 600%;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+}
+
+.name-tag .icon {
+    margin-right: 2px;
+}
