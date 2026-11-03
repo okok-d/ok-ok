@@ -83,7 +83,6 @@
                     Direct messages
                     <span id="dmBadge" class="badge" hidden></span>
                 </button>
-                <button id="tabBlirs" class="tab">Blirs</button>
                 <button id="tabAdmin" class="tab" hidden>Admin</button>
             </div>
 
@@ -140,57 +139,6 @@
 
             </div>
 
-            <!-- Blirs inventory -->
-            <div id="blirsPanel" hidden>
-
-                <div class="blir-summary">
-                    <div class="stat-box">
-                        <span class="field-label">Total Blirs</span>
-                        <strong id="blirTotal">0</strong>
-                    </div>
-                    <div class="stat-box">
-                        <span class="field-label">Unique collected</span>
-                        <strong id="blirUnique">0 / 0</strong>
-                    </div>
-                </div>
-
-                <div class="rewards">
-                    <div class="field-label">Rewards (one of each per day, resets at 00:00 UTC)</div>
-                    <div class="reward-row">
-                        <span>Daily reward</span>
-                        <button id="claimDaily" disabled>Claim daily Blir</button>
-                    </div>
-                    <div class="reward-row">
-                        <span id="questProgress">Send 5 chat messages today: 0/5</span>
-                        <button id="claimQuest" disabled>Claim quest Blir</button>
-                    </div>
-                </div>
-
-                <div class="blir-controls">
-                    <input id="blirSearch" type="text" placeholder="Search Blirs..." autocomplete="off">
-                    <select id="blirFilter" aria-label="Filter by rarity">
-                        <option value="all">All rarities</option>
-                        <option value="common">Common</option>
-                        <option value="uncommon">Uncommon</option>
-                        <option value="rare">Rare</option>
-                        <option value="epic">Epic</option>
-                        <option value="legendary">Legendary</option>
-                        <option value="mythic">Mythic</option>
-                    </select>
-                    <select id="blirSort" aria-label="Sort Blirs">
-                        <option value="rarity-desc">Rarest first</option>
-                        <option value="rarity-asc">Most common first</option>
-                        <option value="name">Name (A-Z)</option>
-                        <option value="qty">Most owned</option>
-                        <option value="recent">Recently collected</option>
-                    </select>
-                </div>
-
-                <div id="blirGrid" class="blir-grid"></div>
-                <p id="blirEmpty" class="dm-empty" hidden></p>
-
-            </div>
-
             <!-- Admin panel (owner only) -->
             <div id="adminPanel" hidden>
                 <div id="adminStats" class="admin-stats"></div>
@@ -223,29 +171,6 @@
             <p id="profileHandle" class="handle"></p>
             <div id="profileBadges" class="badges"></div>
             <p id="profileBio"></p>
-
-            <!-- Blir showcase -->
-            <div id="profileShowcase" class="showcase" hidden>
-                <div class="showcase-head">
-                    <div class="field-label">Showcase</div>
-                    <button id="showcaseEditButton" class="small-btn" hidden>Edit</button>
-                </div>
-
-                <div id="showcaseGrid" class="showcase-grid"></div>
-
-                <div id="showcaseEditor" class="showcase-editor" hidden>
-                    <div class="field-label">Your showcase (<span id="showcaseCount">0 / 6</span>)</div>
-                    <div id="showcaseSlots" class="showcase-slots"></div>
-
-                    <div class="field-label">Pick from your Blirs</div>
-                    <div id="showcasePicker" class="showcase-picker"></div>
-
-                    <div class="input-area">
-                        <button id="showcaseSave">Save showcase</button>
-                        <button id="showcaseCancel">Cancel</button>
-                    </div>
-                </div>
-            </div>
 
             <button id="messageButton" hidden>Message</button>
 
@@ -284,45 +209,6 @@
                 <button id="saveProfile">Save profile</button>
             </div>
         </div>
-    </div>
-
-    <!-- Blir detail modal -->
-    <div id="blirModal" class="modal" hidden>
-        <div class="modal-card">
-            <button id="closeBlirModal" class="close">✕</button>
-            <div id="blirModalArt" class="detail-art"></div>
-            <h2 id="blirModalName"></h2>
-            <div id="blirModalRarity"></div>
-            <p id="blirModalDesc"></p>
-            <p id="blirModalOwned"></p>
-            <p id="blirModalFirst" class="handle"></p>
-            <button id="blirShowcaseToggle">Add to showcase</button>
-        </div>
-    </div>
-
-    <!-- Blir collection animation -->
-    <div id="blirReveal" class="modal" hidden>
-        <div class="modal-card reveal-card">
-            <div class="reveal-title">BLIR COLLECTED</div>
-            <div id="revealArtWrap" class="reveal-art-wrap">
-                <div id="revealArt" class="reveal-art"></div>
-            </div>
-            <h2 id="revealName"></h2>
-            <div id="revealRarity"></div>
-            <p id="revealNote"></p>
-            <button id="revealClose">Nice!</button>
-        </div>
-    </div>
-
-    <!-- Collection notifications -->
-    <div id="blirToasts" class="blir-toasts" aria-live="polite"></div>
-
-    <!-- Blir monitor -->
-    <div id="heartbeatBox" class="heartbeat" role="img" aria-label="Blir monitor">
-        <div class="hb-head">
-            <span class="hb-label"><span id="hbDot" class="hb-dot"></span>BLIR</span>
-        </div>
-        <canvas id="heartbeatCanvas" width="150" height="44"></canvas>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
