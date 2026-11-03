@@ -27,7 +27,7 @@ header p {
 }
 
 main {
-    max-width: 650px;
+    max-width: 700px;
     margin: 20px auto;
     padding: 10px;
 }
@@ -46,13 +46,12 @@ main {
     margin-bottom: 10px;
     overflow-wrap: anywhere;
 }
-}
 
 .message small {
     display: block;
     color: #888;
     font-size: 11px;
-    margin-top: 3px;
+    margin-top: 5px;
 }
 
 .input-area {
@@ -82,7 +81,22 @@ button:hover {
     background: #eee;
 }
 
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 #status {
     color: #888;
     font-size: 12px;
+}
+
+@media (max-width: 500px) {
+    .input-area {
+        flex-wrap: wrap;
+    }
+
+    #username {
+        flex-basis: 100%;
+    }
 }
