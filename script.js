@@ -77,7 +77,7 @@ const sendButton = document.getElementById("sendButton");
 const currentUser = document.getElementById("currentUser");
 const status = document.getElementById("status");
 
-// New chat elements
+// New chat elements (online list, typing, reply bar)
 const onlineBar = document.getElementById("onlineBar");
 const typingEl = document.getElementById("typing");
 const replyBar = document.getElementById("replyBar");
@@ -102,8 +102,6 @@ const dmSendButton = document.getElementById("dmSendButton");
 
 // Profile elements
 const profileModal = document.getElementById("profileModal");
-profileModal.hidden = true; // Ensure modal is hidden on load
-
 const profileAvatar = document.getElementById("profileAvatar");
 const profileName = document.getElementById("profileName");
 const profileBio = document.getElementById("profileBio");
@@ -136,20 +134,26 @@ const adminList = document.getElementById("adminList");
 const usernamePattern = /^[a-z0-9_]{1,20}$/;
 
 let currentSession = null;
-let loadedUserId = null; 
+let loadedUserId = null; // the user whose chat is currently loaded
 let chatChannel = null;
 let activeRoom = "goldfish";
 let myUsername = "";
 let replyingTo = null;
 let presenceChannel = null;
-const messageCache = new Map(); 
+let typingTimer = null;
+let audioCtx = null;
+const messageCache = new Map(); // message id -> message row
 
+// Roles (these only control what buttons show; the database enforces the rules)
 let isStaff = false;
 let isOwner = false;
 let isBanned = false;
 let allBadges = [];
 
-const shownMessages = new Set();  
+const REACTION_EMOJIS = ["👍", "😂", "🔥", "😮", "😢", "💯"];
+const reactionsByMsg = new Map(); // message id -> [{ user_id, emoji }]
+const reactionBars = new Map();   // message id -> reactions element
+const shownMessages = new Set();  // public message ids already on screen
 
 // ---------- Dark mode ----------
 
@@ -168,7 +172,9 @@ themeToggle.addEventListener("click", () => {
 
     try {
         localStorage.setItem("theme", next);
-    } catch (e) {}
+    } catch (e) {
+        // Storage can be blocked; the theme still changes for this visit
+    }
 
     updateThemeLabel();
 });
@@ -220,6 +226,7 @@ signupButton.addEventListener("click", async () => {
         return;
     }
 
+    // onAuthStateChange handles SIGNED_IN
     status.textContent = data.session
         ? "Account created!"
         : "Check your email to confirm your account, then log in.";
@@ -253,9 +260,11 @@ logoutButton.addEventListener("click", async () => {
         return;
     }
 
+    // onAuthStateChange (SIGNED_OUT) resets the screen
     status.textContent = "Logged out.";
 });
 
+// Update account screen
 async function updateAccount(session) {
     currentSession = session;
 
@@ -271,6 +280,7 @@ async function updateAccount(session) {
         return;
     }
 
+    // Skip if this user's chat is already loaded (tab refocus re-fires SIGNED_IN)
     if (loadedUserId === session.user.id) return;
     loadedUserId = session.user.id;
 
@@ -284,7 +294,7 @@ async function updateAccount(session) {
         .single();
 
     if (error) {
-        loadedUserId = null; 
+        loadedUserId = null; // allow a retry
         status.textContent = "Profile error: " + error.message;
         console.error(error);
         return;
@@ -302,12 +312,14 @@ async function updateAccount(session) {
 
 // ---------- Profiles ----------
 
+// Cache so each profile is only fetched once
 const profileCache = new Map();
 let viewedProfileId = null;
 
 let lastProfileError = "";
 let profileWarned = false;
 
+// Fallback when the database has no foreign key for the nested badge query
 async function loadBadgesSeparately(userId) {
     const [owned, all] = await Promise.all([
         db.from("user_badges").select("badge_key").eq("user_id", userId),
@@ -363,6 +375,7 @@ function getProfile(userId, force = false) {
     return request;
 }
 
+// Name fonts (keys must match the database check and the dropdown)
 const FONTS = {
     "pacifico": "'Pacifico', cursive",
     "lobster": "'Lobster', cursive",
@@ -388,6 +401,7 @@ function renderBanner(el, profile) {
     el.replaceChildren();
     const url = profile && profile.banner_url;
 
+    // Only trust images from your own Supabase storage
     if (url && url.startsWith(SUPABASE_URL + "/storage/")) {
         const img = document.createElement("img");
         img.src = url;
@@ -397,6 +411,7 @@ function renderBanner(el, profile) {
     }
 }
 
+// Upload an image to the avatars bucket; returns its public URL or null
 async function uploadImage(file, path) {
     const allowed = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
@@ -415,11 +430,12 @@ async function uploadImage(file, path) {
     }
 
     const { data } = db.storage.from("avatars").getPublicUrl(path);
-    return data.publicUrl + "?v=" + Date.now();
+    return data.publicUrl + "?v=" + Date.now(); // bust cache
 }
 
 function postError(error) {
     if (isBanned) return "You are banned from posting.";
+
     return "Message failed: " + error.message;
 }
 
@@ -431,6 +447,7 @@ function badgeList(profile) {
     return ((profile && profile.user_badges) || [])
         .map((b) => b.badges)
         .filter(Boolean)
+        // the </> member badge always sits on the far left
         .sort((a, b) => (a.icon === "code" ? 0 : 1) - (b.icon === "code" ? 0 : 1));
 }
 
@@ -451,6 +468,7 @@ function renderAvatar(el, profile) {
     el.replaceChildren();
     const url = profile && profile.avatar_url;
 
+    // Only trust images from your own Supabase storage
     if (url && url.startsWith(SUPABASE_URL + "/storage/")) {
         const img = document.createElement("img");
         img.src = url;
@@ -551,7 +569,7 @@ async function saveProfile() {
         }
 
         const { data } = db.storage.from("avatars").getPublicUrl(path);
-        updates.avatar_url = data.publicUrl + "?v=" + Date.now();
+        updates.avatar_url = data.publicUrl + "?v=" + Date.now(); // bust cache
     }
 
     const bannerChosen = bannerFile.files[0];
@@ -580,9 +598,10 @@ async function saveProfile() {
         return;
     }
 
+    // An update blocked by row-level security succeeds silently with 0 rows
     if (!saved || saved.length === 0) {
         status.textContent =
-            "Save was blocked: the database didn't let you update your profile row.";
+            "Save was blocked: the database didn't let you update your profile row. Check the profiles update policy.";
         return;
     }
 
@@ -633,7 +652,7 @@ banButton.addEventListener("click", async () => {
 
 document.getElementById("closeProfile").addEventListener("click", () => {
     profileModal.hidden = true;
-    if (!adminPanel.hidden) loadAdmin();
+    if (!adminPanel.hidden) loadAdmin(); // refresh badges shown in the admin list
 });
 
 profileModal.addEventListener("click", (event) => {
@@ -672,6 +691,7 @@ async function loadRoles() {
     if (isBanned) status.textContent = "You are banned from posting.";
 }
 
+// Moderation tools inside the profile card (staff only)
 async function renderModeration(userId, profile, isMine) {
     if (!isStaff || !profile) return;
 
@@ -683,313 +703,1220 @@ async function renderModeration(userId, profile, isMine) {
     if (viewedProfileId !== userId) return;
 
     const targetKeys = (owned || []).map((b) => b.badge_key);
+    const targetIsStaff = targetKeys.includes("owner") || targetKeys.includes("mod");
 
-    modSection.hidden = false;
+    // Owner: give or remove badges
+    if (isOwner) {
+        badgeManager.replaceChildren();
+        modSection.querySelector(".field-label").textContent =
+            isMine ? "Your badges (click to give or remove)" : "Moderation";
 
-    badgeManager.hidden = false;
-    badgeManager.replaceChildren();
+        allBadges.forEach((b) => {
+            const has = targetKeys.includes(b.key);
 
-    allBadges.forEach((badge) => {
-        const wrap = document.createElement("label");
-        wrap.className = "badge-toggle";
+            const button = document.createElement("button");
+            button.className = "chip" + (has ? " mine" : "");
+            button.append(makeIcon(b.icon), " " + b.label);
+            button.title = has ? "Click to remove" : "Click to give";
+            button.addEventListener("click", () => toggleBadge(userId, b.key, has));
 
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked = targetKeys.includes(badge.key);
-        cb.disabled = (!isOwner && (badge.key === "owner" || badge.key === "mod")) || (badge.key === "owner");
-
-        cb.addEventListener("change", async () => {
-            cb.disabled = true;
-            const { error } = cb.checked
-                ? await db.from("user_badges").insert({ user_id: userId, badge_key: badge.key })
-                : await db.from("user_badges").delete().eq("user_id", userId).eq("badge_key", badge.key);
-
-            cb.disabled = false;
-            if (error) {
-                status.textContent = "Badge update failed: " + error.message;
-                cb.checked = !cb.checked;
-            } else {
-                status.textContent = "Badge updated!";
-                profileCache.delete(userId);
-            }
+            badgeManager.appendChild(button);
         });
 
-        wrap.append(cb, " ", badge.label);
-        badgeManager.appendChild(wrap);
-    });
+        badgeManager.hidden = false;
+        modSection.hidden = false;
+    }
 
-    const canBan = isOwner || (!targetKeys.includes("owner") && !targetKeys.includes("mod"));
-    if (!isMine && canBan) {
+    // Owner and mods: ban or unban non-staff users
+    if (!isMine && !targetIsStaff) {
+        const { data } = await db
+            .from("bans")
+            .select("user_id")
+            .eq("user_id", userId)
+            .maybeSingle();
+
+        if (viewedProfileId !== userId) return;
+
+        banButton.dataset.banned = data ? "1" : "";
+        banButton.textContent = data ? "Unban user" : "Ban user";
         banButton.hidden = false;
-        const { data: banCheck } = await db.from("bans").select("user_id").eq("user_id", userId).single();
-        const banned = !!banCheck;
-        banButton.dataset.banned = banned ? "1" : "0";
-        banButton.textContent = banned ? "Unban user" : "Ban user";
-        banButton.className = banned ? "unban-btn" : "ban-btn";
+        modSection.hidden = false;
+
+        if (data) {
+            const pill = document.createElement("span");
+            pill.className = "pill banned";
+            pill.append(makeIcon("skull-bones"), " Banned");
+            profileBadges.appendChild(pill);
+        }
     }
 }
 
-// ---------- Admin Panel ----------
+async function toggleBadge(userId, key, has) {
+    const mine = currentSession && userId === currentSession.user.id;
 
-tabAdmin.addEventListener("click", () => {
-    tabPublic.classList.remove("active");
-    tabDMs.classList.remove("active");
-    tabAdmin.classList.add("active");
-    publicPanel.hidden = true;
-    dmPanel.hidden = true;
-    adminPanel.hidden = false;
-    loadAdmin();
-});
+    if (has && mine && key === "owner") {
+        if (!confirm("Remove your own Owner badge? You will lose your owner tools.")) return;
+    }
 
-tabPublic.addEventListener("click", () => {
-    tabAdmin.classList.remove("active");
-    tabDMs.classList.remove("active");
-    tabPublic.classList.add("active");
-    adminPanel.hidden = true;
-    dmPanel.hidden = true;
-    publicPanel.hidden = false;
-});
+    const { error } = has
+        ? await db.from("user_badges").delete().eq("user_id", userId).eq("badge_key", key)
+        : await db.from("user_badges").insert({ user_id: userId, badge_key: key });
 
-tabDMs.addEventListener("click", () => {
-    tabAdmin.classList.remove("active");
-    tabPublic.classList.remove("active");
-    tabDMs.classList.add("active");
-    adminPanel.hidden = true;
-    publicPanel.hidden = true;
-    dmPanel.hidden = false;
-    dmBadge.hidden = true;
-    dmBadge.textContent = "";
-});
-
-async function loadAdmin() {
-    if (!isOwner) return;
-
-    adminStats.textContent = "Loading stats...";
-    adminRooms.replaceChildren();
-
-    const [usersCount, bannedCount, messagesCount] = await Promise.all([
-        db.from("profiles").select("*", { count: "exact", head: true }),
-        db.from("bans").select("*", { count: "exact", head: true }),
-        db.from("messages").select("*", { count: "exact", head: true })
-    ]);
-
-    adminStats.textContent = `${usersCount.count || 0} users, ${bannedCount.count || 0} banned, ${messagesCount.count || 0} messages`;
-
-    const rooms = ["goldfish", "ritz", "cheezits", "takis", "hot-cheetos"];
-    rooms.forEach((room) => {
-        const btn = document.createElement("button");
-        btn.className = "room";
-        btn.textContent = `Clear #${room}`;
-        btn.addEventListener("click", async () => {
-            if (!confirm(`Are you sure you want to delete all messages in #${room}?`)) return;
-            const { error } = await db.from("messages").delete().eq("room", room);
-            if (error) status.textContent = "Clear failed: " + error.message;
-            else {
-                status.textContent = `Cleared #${room}!`;
-                loadMessages();
-            }
-        });
-        adminRooms.appendChild(btn);
-    });
-
-    await searchAdminUsers(adminSearch.value.trim());
-}
-
-async function searchAdminUsers(query) {
-    let req = db.from("profiles").select("id, username, display_name, avatar_url");
-    if (query) req = req.ilike("username", `%${query}%`);
-
-    const { data: users, error } = await req.limit(20);
     if (error) {
-        adminList.textContent = "Search failed: " + error.message;
+        status.textContent = "Badge change failed: " + error.message;
         return;
     }
 
-    adminList.replaceChildren();
+    profileCache.delete(userId);
+    if (mine) await loadRoles();
+    await openProfile(userId);
+    await loadMessages();
+}
 
-    for (const u of users) {
-        const row = document.createElement("div");
-        row.className = "admin-user-row";
+// ---------- Small helpers: sound, mentions, replies, edits ----------
 
-        const nameSpan = document.createElement("span");
-        nameSpan.textContent = `${u.username} `;
-        const handle = document.createElement("small");
-        handle.textContent = `@${u.username}`;
-        nameSpan.appendChild(handle);
-
-        const profBtn = document.createElement("button");
-        profBtn.textContent = "Badges";
-        profBtn.addEventListener("click", () => openProfile(u.id));
-
-        const delMsgBtn = document.createElement("button");
-        delMsgBtn.textContent = "Delete messages";
-        delMsgBtn.addEventListener("click", async () => {
-            if (!confirm(`Delete all messages sent by ${u.username}?`)) return;
-            await db.from("messages").delete().eq("user_id", u.id);
-            status.textContent = `Deleted messages for ${u.username}`;
-        });
-
-        const delAccBtn = document.createElement("button");
-        delAccBtn.textContent = "Delete account";
-        delAccBtn.className = "danger";
-        delAccBtn.addEventListener("click", async () => {
-            if (!confirm(`Delete user account ${u.username}? This cannot be undone.`)) return;
-            
-            const { error: err } = await db.from("profiles").delete().eq("id", u.id);
-            if (err) status.textContent = "Account delete failed: " + err.message;
-            else {
-                status.textContent = "Account deleted.";
-                searchAdminUsers(adminSearch.value.trim());
-            }
-        });
-
-        row.append(nameSpan, profBtn, delMsgBtn, delAccBtn);
-        adminList.appendChild(row);
+function beep() {
+    try {
+        audioCtx = audioCtx || new AudioContext();
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.connect(g);
+        g.connect(audioCtx.destination);
+        o.frequency.value = 880;
+        g.gain.value = 0.05;
+        o.start();
+        o.stop(audioCtx.currentTime + 0.15);
+    } catch (e) {
+        // Sound is optional
     }
 }
 
-adminSearch.addEventListener("input", () => searchAdminUsers(adminSearch.value.trim()));
-adminRefresh.addEventListener("click", () => loadAdmin());
+// Writes text into el, highlighting @names
+function renderContent(el, text) {
+    el.replaceChildren();
 
-// ---------- Chat & Messages ----------
-
-roomTabs.querySelectorAll(".room").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-        roomTabs.querySelectorAll(".room").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        activeRoom = btn.dataset.room;
-        clearReply();
-        await loadMessages();
+    text.split(/(@[a-zA-Z0-9_]{1,20})/g).forEach((part) => {
+        if (/^@[a-zA-Z0-9_]{1,20}$/.test(part)) {
+            const s = document.createElement("span");
+            s.className = "mention" + (part.slice(1).toLowerCase() === myUsername ? " me" : "");
+            s.textContent = part;
+            el.appendChild(s);
+        } else {
+            el.append(part);
+        }
     });
-});
-
-async function loadMessages() {
-    shownMessages.clear();
-    messages.replaceChildren();
-
-    const { data, error } = await db
-        .from("messages")
-        .select("id, user_id, room, content, created_at, reply_to")
-        .eq("room", activeRoom)
-        .order("created_at", { ascending: true })
-        .limit(100);
-
-    if (error) {
-        messages.textContent = "Error loading messages: " + error.message;
-        return;
-    }
-
-    if (!data.length) {
-        messages.innerHTML = "<p>No messages here yet. Say something!</p>";
-        return;
-    }
-
-    for (const msg of data) {
-        messageCache.set(msg.id, msg);
-        await appendMessage(msg);
-    }
-    messages.scrollTop = messages.scrollHeight;
 }
 
-async function appendMessage(msg) {
-    if (shownMessages.has(msg.id)) return;
-    shownMessages.add(msg.id);
-
-    const profile = await getProfile(msg.user_id);
-    const div = document.createElement("div");
-    div.className = "message-row";
-
-    const avatar = document.createElement("div");
-    avatar.className = "avatar small";
-    renderAvatar(avatar, profile);
-    avatar.addEventListener("click", () => openProfile(msg.user_id));
-
-    const contentBox = document.createElement("div");
-    contentBox.className = "message-content";
-
-    const header = document.createElement("div");
-    header.className = "message-header";
-    
-    const author = document.createElement("strong");
-    author.textContent = displayNameOf(profile);
-    applyNameFont(author, profile);
-    author.addEventListener("click", () => openProfile(msg.user_id));
-
-    header.appendChild(author);
-    renderBadges(header, profile);
-
-    const text = document.createElement("p");
-    text.textContent = msg.content;
-
-    contentBox.append(header, text);
-    div.append(avatar, contentBox);
-    messages.appendChild(div);
+function mentionsMe(text) {
+    return !!myUsername &&
+        new RegExp("@" + myUsername + "(?![a-zA-Z0-9_])", "i").test(text);
 }
 
-sendButton.addEventListener("click", sendMessage);
-input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendMessage();
-});
-
-async function sendMessage() {
-    const text = input.value.trim();
-    if (!text || isBanned || !currentSession) return;
-
-    input.value = "";
-    const { error } = await db.from("messages").insert({
-        room: activeRoom,
-        content: text,
-        user_id: currentSession.user.id,
-        reply_to: replyingTo ? replyingTo.id : null
-    });
-
-    if (error) {
-        status.textContent = postError(error);
-    } else {
-        clearReply();
-    }
+function startReply(msg) {
+    replyingTo = msg.id;
+    replyText.textContent =
+        "Replying to " + (msg.username || "user") + ": " + msg.content.slice(0, 60);
+    replyBar.hidden = false;
+    input.focus();
 }
 
 function clearReply() {
     replyingTo = null;
     replyBar.hidden = true;
-    replyText.textContent = "";
 }
 
-function setupRealtime() {
-    db.channel("public-messages")
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
-            const msg = payload.new;
-            messageCache.set(msg.id, msg);
-            if (msg.room === activeRoom) {
-                appendMessage(msg);
-                messages.scrollTop = messages.scrollHeight;
-            }
-        })
-        .subscribe();
+async function editMessage(id) {
+    const old = messageCache.get(id);
+    if (!old) return;
+
+    const next = prompt("Edit message:", old.content);
+    if (next === null) return;
+
+    const content = next.trim();
+    if (!content || content.length > 1000 || content === old.content) return;
+
+    const { data, error } = await db
+        .from("messages")
+        .update({ content: content, edited_at: new Date().toISOString() })
+        .eq("id", id)
+        .select();
+
+    if (error) {
+        status.textContent = "Edit failed: " + error.message;
+        return;
+    }
+
+    if (!data || data.length === 0) {
+        status.textContent = "You can't edit that message.";
+        return;
+    }
+
+    applyEdit(data[0]);
+}
+
+function applyEdit(m) {
+    const cached = messageCache.get(m.id);
+    if (!cached) return;
+
+    cached.content = m.content;
+    cached.edited_at = m.edited_at;
+
+    const el = messages.querySelector('.message[data-id="' + CSS.escape(String(m.id)) + '"]');
+    if (el && el._setText) el._setText(m.content, !!m.edited_at);
+}
+
+// ---------- Presence: online list and typing ----------
+
+function leavePresence() {
+    if (presenceChannel) {
+        db.removeChannel(presenceChannel);
+        presenceChannel = null;
+    }
+
+    onlineBar.replaceChildren();
+    typingEl.textContent = "";
 }
 
 function joinPresence() {
-    presenceChannel = db.channel("online-users");
-    presenceChannel.subscribe(async (status) => {
-        if (status === "SUBSCRIBED") {
-            await presenceChannel.track({ user_id: currentSession.user.id, online_at: new Date() });
+    leavePresence();
+    if (!currentSession) return;
+
+    presenceChannel = db.channel("presence-" + activeRoom, {
+        config: { presence: { key: currentSession.user.id } }
+    });
+
+    presenceChannel
+        .on("presence", { event: "sync" }, renderPresence)
+        .subscribe(async (state) => {
+            if (state === "SUBSCRIBED" && presenceChannel) {
+                await presenceChannel.track({ username: myUsername, typing: false });
+            }
+        });
+}
+
+function renderPresence() {
+    if (!presenceChannel || !currentSession) return;
+
+    const me = currentSession.user.id;
+    const typers = [];
+
+    onlineBar.replaceChildren();
+
+    Object.entries(presenceChannel.presenceState()).forEach(([id, metas]) => {
+        const meta = metas[0] || {};
+
+        const chip = document.createElement("button");
+        chip.className = "online-chip";
+
+        const av = document.createElement("div");
+        av.className = "avatar small online";
+        av.textContent = (meta.username || "?")[0].toUpperCase();
+        getProfile(id).then((p) => { if (p) renderAvatar(av, p); });
+
+        chip.append(av, meta.username || "user");
+        chip.addEventListener("click", () => openProfile(id));
+        onlineBar.appendChild(chip);
+
+        if (meta.typing && id !== me) typers.push(meta.username || "someone");
+    });
+
+    typingEl.textContent = typers.length
+        ? typers.slice(0, 3).join(", ") + (typers.length > 1 ? " are" : " is") + " typing..."
+        : "";
+}
+
+input.addEventListener("input", () => {
+    if (!presenceChannel) return;
+
+    presenceChannel.track({ username: myUsername, typing: true });
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+        if (presenceChannel) presenceChannel.track({ username: myUsername, typing: false });
+    }, 2000);
+});
+
+// ---------- Deleting messages and reactions ----------
+
+async function deleteMessage(id) {
+    const { data, error } = await db
+        .from("messages")
+        .delete()
+        .eq("id", id)
+        .select();
+
+    if (error) {
+        status.textContent = "Delete failed: " + error.message;
+        return;
+    }
+
+    if (!data || data.length === 0) {
+        status.textContent = "You can't delete that message.";
+        return;
+    }
+
+    removeMessage(id);
+}
+
+function removeMessage(id) {
+    const el = messages.querySelector('.message[data-id="' + CSS.escape(String(id)) + '"]');
+    if (el) el.remove();
+
+    shownMessages.delete(id);
+    reactionBars.delete(id);
+    reactionsByMsg.delete(id);
+    messageCache.delete(id);
+}
+
+function renderReactions(msgId) {
+    const bar = reactionBars.get(msgId);
+    if (!bar) return;
+
+    const me = currentSession ? currentSession.user.id : null;
+    const list = reactionsByMsg.get(msgId) || [];
+
+    bar.replaceChildren();
+
+    REACTION_EMOJIS.forEach((emoji) => {
+        const people = list.filter((r) => r.emoji === emoji);
+        if (people.length === 0) return;
+
+        const chip = document.createElement("button");
+        chip.className = "chip" + (people.some((r) => r.user_id === me) ? " mine" : "");
+        chip.textContent = emoji + " " + people.length;
+        chip.addEventListener("click", () => toggleReaction(msgId, emoji));
+        bar.appendChild(chip);
+    });
+
+    // "+" opens the emoji choices
+    const add = document.createElement("button");
+    add.className = "chip add";
+    add.textContent = "+";
+    add.title = "Add reaction";
+
+    add.addEventListener("click", () => {
+        add.remove();
+
+        REACTION_EMOJIS.forEach((emoji) => {
+            const option = document.createElement("button");
+            option.className = "chip";
+            option.textContent = emoji;
+            option.addEventListener("click", () => toggleReaction(msgId, emoji));
+            bar.appendChild(option);
+        });
+    });
+
+    bar.appendChild(add);
+}
+
+async function toggleReaction(msgId, emoji) {
+    if (!currentSession) return;
+
+    const me = currentSession.user.id;
+    const list = reactionsByMsg.get(msgId) || [];
+    const has = list.some((r) => r.user_id === me && r.emoji === emoji);
+
+    const { error } = has
+        ? await db
+            .from("message_reactions")
+            .delete()
+            .eq("message_id", msgId)
+            .eq("user_id", me)
+            .eq("emoji", emoji)
+        : await db
+            .from("message_reactions")
+            .insert({ message_id: msgId, user_id: me, emoji: emoji });
+
+    if (error) {
+        status.textContent = postError(error);
+        return;
+    }
+
+    applyReaction({ message_id: msgId, user_id: me, emoji: emoji }, !has);
+}
+
+function applyReaction(r, added) {
+    const list = reactionsByMsg.get(r.message_id);
+    if (!list) return; // that message isn't in the room you're viewing
+
+    const index = list.findIndex((x) => x.user_id === r.user_id && x.emoji === r.emoji);
+
+    if (added && index === -1) list.push({ user_id: r.user_id, emoji: r.emoji });
+    if (!added && index !== -1) list.splice(index, 1);
+
+    renderReactions(r.message_id);
+}
+
+// ---------- Public messages ----------
+
+// live = true when the message just arrived over realtime (can ping you)
+function displayMessage(msg, live = false) {
+    // Don't show the same message twice (realtime vs. loadMessages race)
+    if (shownMessages.has(msg.id)) return;
+    shownMessages.add(msg.id);
+    messageCache.set(msg.id, msg);
+
+    const item = document.createElement("div");
+    item.className = "message";
+    item.dataset.id = msg.id;
+
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = "?";
+    avatar.addEventListener("click", () => openProfile(msg.user_id));
+
+    const body = document.createElement("div");
+    body.className = "message-body";
+
+    const name = document.createElement("button");
+    name.className = "name-link";
+    name.textContent = msg.username || "Unknown";
+    name.addEventListener("click", () => openProfile(msg.user_id));
+
+    const tag = document.createElement("span");
+    tag.className = "name-tag";
+
+    const text = document.createElement("span");
+
+    function setText(content, edited) {
+        text.replaceChildren(": ");
+
+        const c = document.createElement("span");
+        renderContent(c, content);
+        text.appendChild(c);
+
+        if (edited) {
+            const editedTag = document.createElement("span");
+            editedTag.className = "edited";
+            editedTag.textContent = "(edited)";
+            text.appendChild(editedTag);
         }
+    }
+
+    setText(msg.content, !!msg.edited_at);
+    item._setText = setText;
+
+    if (live && currentSession && msg.user_id !== currentSession.user.id && mentionsMe(msg.content)) {
+        item.classList.add("pinged");
+        status.textContent = (msg.username || "Someone") + " mentioned you.";
+        beep();
+        notify((msg.username || "Someone") + " mentioned you", msg.content);
+    }
+
+    const time = document.createElement("small");
+    time.textContent = new Date(msg.created_at).toLocaleString();
+
+    const line = document.createElement("div");
+    line.append(name, tag, text);
+
+    if (currentSession) {
+        // Reply button
+        const rep = document.createElement("button");
+        rep.className = "icon-btn";
+        rep.textContent = "↩";
+        rep.title = "Reply";
+        rep.addEventListener("click", () => startReply(messageCache.get(msg.id) || msg));
+        line.appendChild(rep);
+
+        // Edit button (your own messages only)
+        if (msg.user_id === currentSession.user.id) {
+            const ed = document.createElement("button");
+            ed.className = "icon-btn";
+            ed.textContent = "✏";
+            ed.title = "Edit message";
+            ed.addEventListener("click", () => editMessage(msg.id));
+            line.appendChild(ed);
+        }
+    }
+
+    // Delete button (your own messages, or any message if you're staff)
+    if (currentSession && (msg.user_id === currentSession.user.id || isStaff)) {
+        const del = document.createElement("button");
+        del.className = "icon-btn";
+        del.textContent = "🗑";
+        del.title = "Delete message";
+        del.addEventListener("click", () => deleteMessage(msg.id));
+        line.appendChild(del);
+    }
+
+    // Reactions
+    const reactBar = document.createElement("div");
+    reactBar.className = "reactions";
+    reactionBars.set(msg.id, reactBar);
+    reactionsByMsg.set(msg.id, msg.message_reactions || []);
+    renderReactions(msg.id);
+
+    // Quote of the message being replied to
+    if (msg.reply_to) {
+        const orig = messageCache.get(msg.reply_to);
+        const quote = document.createElement("div");
+        quote.className = "quote";
+        quote.textContent = orig
+            ? "↪ " + (orig.username || "user") + ": " + orig.content.slice(0, 80)
+            : "↪ original message";
+        body.appendChild(quote);
+    }
+
+    body.append(line, time, reactBar);
+    item.append(avatar, body);
+
+    messages.appendChild(item);
+    messages.scrollTop = messages.scrollHeight;
+
+    // Fill in avatar and name once the profile loads
+    getProfile(msg.user_id).then((profile) => {
+        renderAvatar(avatar, profile);
+        if (profile) name.textContent = displayNameOf(profile);
+        applyNameFont(name, profile);
+
+        const badges = badgeList(profile);
+        tag.replaceChildren(...badges.map((b) => makeIcon(b.icon, b.color)));
+        tag.title = badges.map((b) => b.label).join(", ");
     });
 }
 
-function leavePresence() {
-    if (presenceChannel) db.removeChannel(presenceChannel);
+// Load messages
+async function loadMessages() {
+    const room = activeRoom;
+
+    let { data, error } = await db
+        .from("messages")
+        .select("*, message_reactions(user_id, emoji)")
+        .eq("room", room)
+        .order("created_at", { ascending: true });
+
+    if (error) {
+        // Fall back to plain messages if reactions aren't set up yet
+        ({ data, error } = await db
+            .from("messages")
+            .select("*")
+            .eq("room", room)
+            .order("created_at", { ascending: true }));
+    }
+
+    if (room !== activeRoom) return;
+
+    if (error) {
+        status.textContent = "Message loading failed: " + error.message;
+        console.error(error);
+        return;
+    }
+
+    reactionsByMsg.clear();
+    reactionBars.clear();
+    shownMessages.clear();
+    messageCache.clear();
+    messages.replaceChildren();
+    data.forEach((m) => displayMessage(m));
 }
 
-function listenForDMs() {}
-function resetDMs() {}
-function openConversation(userId) {
-    tabDMs.click();
+// Send message
+async function sendMessage() {
+    if (!currentSession) {
+        status.textContent = "Please log in first.";
+        return;
+    }
+
+    const content = input.value.trim();
+
+    if (!content || content.length > 1000) return;
+
+    sendButton.disabled = true;
+
+    const { error } = await db
+        .from("messages")
+        .insert({
+            user_id: currentSession.user.id,
+            room: activeRoom,
+            content: content,
+            reply_to: replyingTo
+        });
+
+    if (error) {
+        status.textContent = postError(error);
+        console.error(error);
+    } else {
+        input.value = "";
+        clearReply();
+        status.textContent = "Message sent!";
+    }
+
+    sendButton.disabled = isBanned;
+    input.focus();
 }
 
-db.auth.onAuthStateChange((event, session) => {
-    updateAccount(session);
+sendButton.addEventListener("click", sendMessage);
+
+input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+        sendMessage();
+    }
 });
 
-setupRealtime();
+// Live message updates
+function listenForMessages() {
+    if (chatChannel) return;
+
+    chatChannel = db
+        .channel("chat-room")
+        .on(
+            "postgres_changes",
+            { event: "INSERT", schema: "public", table: "messages" },
+            (payload) => {
+                if (payload.new.room === activeRoom) {
+                    displayMessage(payload.new, true);
+                } else {
+                    // Unread dot on the room tab
+                    const b = roomTabs.querySelector('[data-room="' + payload.new.room + '"]');
+                    if (b) b.classList.add("unread");
+                }
+            }
+        )
+        .on(
+            "postgres_changes",
+            { event: "UPDATE", schema: "public", table: "messages" },
+            (payload) => applyEdit(payload.new)
+        )
+        .on(
+            "postgres_changes",
+            { event: "DELETE", schema: "public", table: "messages" },
+            (payload) => removeMessage(payload.old.id)
+        )
+        .on(
+            "postgres_changes",
+            { event: "INSERT", schema: "public", table: "message_reactions" },
+            (payload) => applyReaction(payload.new, true)
+        )
+        .on(
+            "postgres_changes",
+            { event: "DELETE", schema: "public", table: "message_reactions" },
+            // Needs: alter table message_reactions replica identity full;
+            (payload) => applyReaction(payload.old, false)
+        )
+        .subscribe((state) => {
+            console.log("Realtime:", state);
+
+            if (state === "SUBSCRIBED") {
+                status.textContent = "Connected to chat!";
+            } else if (
+                state === "CHANNEL_ERROR" ||
+                state === "TIMED_OUT" ||
+                state === "CLOSED"
+            ) {
+                status.textContent = "Connection issue: " + state;
+            }
+        });
+}
+
+// Switch chat rooms
+input.placeholder = "Message #" + activeRoom + "...";
+
+roomTabs.addEventListener("click", (event) => {
+    const button = event.target.closest(".room");
+
+    if (!button || button.dataset.room === activeRoom) return;
+
+    activeRoom = button.dataset.room;
+    button.classList.remove("unread");
+    clearReply();
+
+    roomTabs.querySelectorAll(".room").forEach((b) => {
+        b.classList.toggle("active", b === button);
+    });
+
+    input.placeholder = "Message #" + activeRoom + "...";
+    messages.replaceChildren();
+    shownMessages.clear();
+    loadMessages();
+    joinPresence();
+});
+
+// ---------- Notifications ----------
+
+// Browser notifications only show when the tab isn't in focus
+function notify(title, body) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    if (!document.hidden) return;
+
+    try {
+        new Notification(title, { body: String(body).slice(0, 100) });
+    } catch (e) {
+        // Some browsers block this; sound still plays
+    }
+}
+
+// Ask once, on the first click (browsers require a user gesture)
+document.addEventListener("click", () => {
+    if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+}, { once: true });
+
+// ---------- Direct messages ----------
+
+let activeDM = null;          // user id of the open conversation
+let dmChannel = null;
+const unreadFrom = new Set(); // user ids with unread messages (this visit only)
+const shownDMs = new Set();   // message ids already on screen
+
+function updateBadge() {
+    dmBadge.hidden = unreadFrom.size === 0;
+    dmBadge.textContent = unreadFrom.size;
+}
+
+// view: false = public chat, true = DMs, "admin" = admin panel
+function switchPanel(view) {
+    const v = view === "admin" ? "admin" : view ? "dms" : "public";
+
+    publicPanel.hidden = v !== "public";
+    dmPanel.hidden = v !== "dms";
+    adminPanel.hidden = v !== "admin";
+    tabPublic.classList.toggle("active", v === "public");
+    tabDMs.classList.toggle("active", v === "dms");
+    tabAdmin.classList.toggle("active", v === "admin");
+}
+
+tabPublic.addEventListener("click", () => switchPanel(false));
+
+tabDMs.addEventListener("click", () => {
+    if (activeDM) {
+        openConversation(activeDM);
+    } else {
+        loadConversations();
+    }
+});
+
+dmBack.addEventListener("click", () => loadConversations());
+
+// Show the list of people you've talked to
+async function loadConversations() {
+    if (!currentSession) return;
+
+    switchPanel(true);
+    activeDM = null;
+    dmListView.hidden = false;
+    dmChatView.hidden = true;
+
+    const me = currentSession.user.id;
+
+    const { data, error } = await db
+        .from("direct_messages")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500);
+
+    if (error) {
+        status.textContent = "Could not load DMs: " + error.message;
+        console.error(error);
+        return;
+    }
+
+    // Keep only the newest message per person
+    const latest = new Map();
+
+    data.forEach((m) => {
+        const other = m.sender_id === me ? m.recipient_id : m.sender_id;
+        if (!latest.has(other)) latest.set(other, m);
+    });
+
+    dmList.replaceChildren();
+
+    if (latest.size === 0) {
+        const empty = document.createElement("p");
+        empty.className = "dm-empty";
+        empty.textContent =
+            "No conversations yet. Click a username in the public chat and press Message.";
+        dmList.appendChild(empty);
+        return;
+    }
+
+    latest.forEach((last, otherId) => {
+        const row = document.createElement("button");
+        row.className = "dm-row";
+
+        const avatar = document.createElement("div");
+        avatar.className = "avatar";
+        avatar.textContent = "?";
+
+        const textBox = document.createElement("div");
+        textBox.className = "dm-text";
+
+        const name = document.createElement("strong");
+        name.textContent = "Loading...";
+
+        const preview = document.createElement("span");
+        preview.className = "dm-preview";
+        preview.textContent =
+            (last.sender_id === me ? "You: " : "") + last.content;
+
+        textBox.append(name, preview);
+        row.append(avatar, textBox);
+
+        if (unreadFrom.has(otherId)) {
+            const dot = document.createElement("span");
+            dot.className = "badge";
+            dot.textContent = "new";
+            row.appendChild(dot);
+        }
+
+        row.addEventListener("click", () => openConversation(otherId));
+        dmList.appendChild(row);
+
+        getProfile(otherId).then((profile) => {
+            renderAvatar(avatar, profile);
+            name.textContent = profile ? displayNameOf(profile) : "Unknown";
+            applyNameFont(name, profile);
+        });
+    });
+}
+
+// Show one conversation
+async function openConversation(userId) {
+    if (!currentSession) return;
+
+    const me = currentSession.user.id;
+
+    activeDM = userId;
+    unreadFrom.delete(userId);
+    updateBadge();
+
+    switchPanel(true);
+    dmListView.hidden = true;
+    dmChatView.hidden = false;
+    dmMessages.replaceChildren();
+    shownDMs.clear();
+    dmHeaderName.textContent = "Loading...";
+    dmHeaderAvatar.replaceChildren();
+
+    const profile = await getProfile(userId);
+
+    if (activeDM !== userId) return;
+
+    dmHeaderName.textContent = profile ? displayNameOf(profile) : "Unknown";
+    applyNameFont(dmHeaderName, profile);
+    renderAvatar(dmHeaderAvatar, profile);
+
+    const { data, error } = await db
+        .from("direct_messages")
+        .select("*")
+        .or(
+            "and(sender_id.eq." + me + ",recipient_id.eq." + userId + ")," +
+            "and(sender_id.eq." + userId + ",recipient_id.eq." + me + ")"
+        )
+        .order("created_at", { ascending: true });
+
+    if (activeDM !== userId) return;
+
+    if (error) {
+        status.textContent = "Could not load messages: " + error.message;
+        console.error(error);
+        return;
+    }
+
+    data.forEach(displayDM);
+    dmInput.focus();
+}
+
+function displayDM(m) {
+    if (shownDMs.has(m.id)) return;
+    shownDMs.add(m.id);
+
+    const mine = currentSession && m.sender_id === currentSession.user.id;
+
+    const item = document.createElement("div");
+    item.className = "message dm-msg" + (mine ? " mine" : "");
+
+    const text = document.createElement("div");
+    text.textContent = m.content;
+
+    const time = document.createElement("small");
+    time.textContent = new Date(m.created_at).toLocaleString();
+
+    item.append(text, time);
+    dmMessages.appendChild(item);
+    dmMessages.scrollTop = dmMessages.scrollHeight;
+}
+
+async function sendDM() {
+    if (!currentSession || !activeDM) return;
+
+    const content = dmInput.value.trim();
+
+    if (!content || content.length > 1000) return;
+
+    dmSendButton.disabled = true;
+
+    const { data, error } = await db
+        .from("direct_messages")
+        .insert({
+            sender_id: currentSession.user.id,
+            recipient_id: activeDM,
+            content: content
+        })
+        .select()
+        .single();
+
+    dmSendButton.disabled = isBanned;
+
+    if (error) {
+        status.textContent = postError(error);
+        console.error(error);
+        return;
+    }
+
+    dmInput.value = "";
+    displayDM(data);
+    dmInput.focus();
+}
+
+dmSendButton.addEventListener("click", sendDM);
+
+dmInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") sendDM();
+});
+
+// Live direct messages (only rows you sent or received arrive)
+function listenForDMs() {
+    if (dmChannel) return;
+
+    dmChannel = db
+        .channel("direct-messages")
+        .on(
+            "postgres_changes",
+            { event: "INSERT", schema: "public", table: "direct_messages" },
+            (payload) => {
+                if (!currentSession) return;
+
+                const m = payload.new;
+                const me = currentSession.user.id;
+
+                if (m.sender_id !== me && m.recipient_id !== me) return;
+
+                const other = m.sender_id === me ? m.recipient_id : m.sender_id;
+                const viewing = !dmPanel.hidden && activeDM === other;
+
+                if (viewing) {
+                    displayDM(m);
+                }
+
+                // Sound and notification for messages sent to you
+                if (m.recipient_id === me && (!viewing || document.hidden)) {
+                    if (!viewing) {
+                        unreadFrom.add(other);
+                        updateBadge();
+                    }
+
+                    beep();
+                    getProfile(other).then((p) => notify(displayNameOf(p), m.content));
+                }
+
+                // Refresh the list if it's showing
+                if (!dmPanel.hidden && dmChatView.hidden) loadConversations();
+            }
+        )
+        .subscribe();
+}
+
+function resetDMs() {
+    tabAdmin.hidden = true;
+    isStaff = false;
+    isOwner = false;
+    isBanned = false;
+    input.disabled = false;
+    sendButton.disabled = false;
+    dmInput.disabled = false;
+    dmSendButton.disabled = false;
+    activeDM = null;
+    unreadFrom.clear();
+    shownDMs.clear();
+    updateBadge();
+    dmList.replaceChildren();
+    dmMessages.replaceChildren();
+    dmListView.hidden = false;
+    dmChatView.hidden = true;
+    switchPanel(false);
+
+    if (dmChannel) {
+        db.removeChannel(dmChannel);
+        dmChannel = null;
+    }
+}
+
+// ---------- Admin panel (owner only; the database enforces the rules) ----------
+
+let adminUsers = [];
+const adminBanned = new Set();
+
+function adminButton(label, onClick, options = {}) {
+    const button = document.createElement("button");
+    button.textContent = label;
+    if (options.danger) button.className = "danger";
+    if (options.disabled) button.disabled = true;
+    button.addEventListener("click", onClick);
+    return button;
+}
+
+async function loadAdmin() {
+    if (!isOwner || !currentSession) return;
+
+    adminStats.textContent = "Loading...";
+    adminRooms.replaceChildren();
+
+    roomTabs.querySelectorAll(".room").forEach((r) => {
+        const room = r.dataset.room;
+        const button = document.createElement("button");
+        button.className = "room";
+        button.textContent = "Clear #" + room;
+        button.addEventListener("click", () => adminClearRoom(room));
+        adminRooms.appendChild(button);
+    });
+
+    let [profiles, bans, msgs] = await Promise.all([
+        db.from("profiles")
+            .select("id, username, display_name, user_badges(badge_key, badges(label, icon, color))")
+            .order("username"),
+        db.from("bans").select("user_id"),
+        db.from("messages").select("id", { count: "exact", head: true })
+    ]);
+
+    if (profiles.error) {
+        const plain = await db
+            .from("profiles")
+            .select("id, username, display_name")
+            .order("username");
+
+        if (!plain.error) {
+            const [ub, all] = await Promise.all([
+                db.from("user_badges").select("user_id, badge_key"),
+                db.from("badges").select("key, label, icon, color")
+            ]);
+            const byKey = new Map((all.data || []).map((b) => [b.key, b]));
+
+            plain.data.forEach((u) => {
+                u.user_badges = (ub.data || [])
+                    .filter((r) => r.user_id === u.id)
+                    .map((r) => ({ badge_key: r.badge_key, badges: byKey.get(r.badge_key) || null }));
+            });
+        }
+
+        profiles = plain;
+    }
+
+    if (profiles.error) {
+        adminStats.textContent = "Could not load users: " + profiles.error.message;
+        return;
+    }
+
+    adminUsers = profiles.data || [];
+    adminBanned.clear();
+    (bans.data || []).forEach((b) => adminBanned.add(b.user_id));
+
+    updateAdminStats(msgs.count);
+    renderAdminList();
+}
+
+function updateAdminStats(messageCount) {
+    if (messageCount !== undefined) adminStats.dataset.messages = messageCount ?? "?";
+
+    adminStats.textContent =
+        adminUsers.length + " users, " +
+        adminBanned.size + " banned, " +
+        (adminStats.dataset.messages || "?") + " messages";
+}
+
+function renderAdminList() {
+    if (!currentSession) return;
+
+    const me = currentSession.user.id;
+    const query = adminSearch.value.trim().toLowerCase();
+
+    adminList.replaceChildren();
+
+    adminUsers
+        .filter((u) =>
+            !query ||
+            u.username.toLowerCase().includes(query) ||
+            (u.display_name || "").toLowerCase().includes(query))
+        .forEach((u) => {
+            const mine = u.id === me;
+            const banned = adminBanned.has(u.id);
+
+            const row = document.createElement("div");
+            row.className = "admin-row";
+
+            const info = document.createElement("div");
+            info.className = "admin-info";
+
+            const name = document.createElement("strong");
+            name.textContent = displayNameOf(u);
+
+            const handle = document.createElement("span");
+            handle.className = "handle";
+            handle.textContent = "@" + u.username + (mine ? " (you)" : "");
+
+            const badges = document.createElement("div");
+            badges.className = "badges";
+            renderBadges(badges, u);
+
+            if (banned) {
+                const pill = document.createElement("span");
+                pill.className = "pill banned";
+                pill.append(makeIcon("skull-bones"), " Banned");
+                badges.appendChild(pill);
+            }
+
+            info.append(name, handle, badges);
+
+            const actions = document.createElement("div");
+            actions.className = "admin-actions";
+            actions.append(
+                adminButton("Badges", () => openProfile(u.id)),
+                adminButton(banned ? "Unban" : "Ban", () => adminToggleBan(u, banned), { disabled: mine }),
+                adminButton("Delete messages", () => adminWipeMessages(u)),
+                adminButton("Delete account", () => adminDeleteUser(u), { danger: true, disabled: mine })
+            );
+
+            row.append(info, actions);
+            adminList.appendChild(row);
+        });
+
+    if (!adminList.children.length) {
+        const empty = document.createElement("p");
+        empty.className = "dm-empty";
+        empty.textContent = "No users match.";
+        adminList.appendChild(empty);
+    }
+}
+
+async function adminToggleBan(user, banned) {
+    const { error } = banned
+        ? await db.from("bans").delete().eq("user_id", user.id)
+        : await db.from("bans").insert({
+            user_id: user.id,
+            banned_by: currentSession.user.id
+        });
+
+    if (error) {
+        status.textContent = "Ban change failed: " + error.message;
+        return;
+    }
+
+    if (banned) adminBanned.delete(user.id);
+    else adminBanned.add(user.id);
+
+    status.textContent = (banned ? "Unbanned " : "Banned ") + "@" + user.username + ".";
+    updateAdminStats();
+    renderAdminList();
+}
+
+async function adminWipeMessages(user) {
+    if (!confirm("Delete every public message from @" + user.username + "?")) return;
+
+    const { data, error } = await db
+        .from("messages")
+        .delete()
+        .eq("user_id", user.id)
+        .select("id");
+
+    if (error) {
+        status.textContent = "Delete failed: " + error.message;
+        return;
+    }
+
+    status.textContent = "Deleted " + (data ? data.length : 0) + " messages from @" + user.username + ".";
+    await loadMessages();
+    loadAdmin();
+}
+
+async function adminClearRoom(room) {
+    if (!confirm("Delete EVERY message in #" + room + "? This cannot be undone.")) return;
+
+    const { data, error } = await db
+        .from("messages")
+        .delete()
+        .eq("room", room)
+        .select("id");
+
+    if (error) {
+        status.textContent = "Clear failed: " + error.message;
+        return;
+    }
+
+    status.textContent = "Cleared #" + room + " (" + (data ? data.length : 0) + " messages).";
+    await loadMessages();
+    loadAdmin();
+}
+
+async function adminDeleteUser(user) {
+    const answer = prompt(
+        "This permanently deletes @" + user.username +
+        " and all of their messages, DMs, badges and uploads.\n\n" +
+        'Type "' + user.username + '" to confirm:'
+    );
+
+    if (answer !== user.username) {
+        if (answer !== null) status.textContent = "Username didn't match. Nothing was deleted.";
+        return;
+    }
+
+    // Uploads must be removed through the Storage API, not SQL
+    const { data: files } = await db.storage.from("avatars").list(user.id);
+
+    if (files && files.length) {
+        const { error: removeError } = await db.storage
+            .from("avatars")
+            .remove(files.map((f) => user.id + "/" + f.name));
+
+        if (removeError) {
+            status.textContent = "Could not delete uploads: " + removeError.message;
+            return;
+        }
+    }
+
+    const { error } = await db.rpc("admin_delete_user", { target: user.id });
+
+    if (error) {
+        status.textContent = "Account delete failed: " + error.message;
+        return;
+    }
+
+    profileCache.delete(user.id);
+    status.textContent = "Deleted @" + user.username + ".";
+    await loadMessages();
+    loadAdmin();
+}
+
+tabAdmin.addEventListener("click", () => {
+    switchPanel("admin");
+    loadAdmin();
+});
+
+adminSearch.addEventListener("input", renderAdminList);
+adminRefresh.addEventListener("click", loadAdmin);
+
+// ---------- Startup ----------
+
+// Restore login when page opens
+async function startChat() {
+    listenForMessages();
+
+    const { data, error } = await db.auth.getSession();
+
+    if (error) {
+        status.textContent = "Session error: " + error.message;
+        return;
+    }
+
+    await updateAccount(data.session);
+}
+
+// Listen for login/logout changes.
+// Don't await Supabase calls inside this callback (can deadlock), so the
+// work is deferred with setTimeout. updateAccount also ignores repeat
+// SIGNED_IN events for a user who is already loaded.
+db.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+        setTimeout(() => updateAccount(session), 0);
+    }
+});
+
+startChat();
