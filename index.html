@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -85,6 +84,7 @@
 
             <div class="account-bar">
                 <span id="currentUser"></span>
+                <button id="myProfileButton">My profile</button>
                 <button id="logoutButton">Log out</button>
             </div>
 
@@ -109,6 +109,33 @@
         <p id="status">Connecting...</p>
 
     </main>
+
+    <!-- Profile modal -->
+    <div id="profileModal" class="modal" hidden>
+        <div class="modal-card">
+            <button id="closeProfile" class="close">✕</button>
+
+            <div id="profileAvatar" class="avatar big"></div>
+            <h2 id="profileName"></h2>
+            <p id="profileBio"></p>
+
+            <div id="profileEdit" hidden>
+                <input
+                    id="avatarFile"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                >
+
+                <textarea
+                    id="bioInput"
+                    maxlength="300"
+                    placeholder="Write a bio (300 characters max)"
+                ></textarea>
+
+                <button id="saveProfile">Save profile</button>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="script.js"></script>
