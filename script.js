@@ -193,11 +193,11 @@ const adminSearch = document.getElementById("adminSearch");
 const adminRefresh = document.getElementById("adminRefresh");
 const adminList = document.getElementById("adminList");
 
-// FIX: digits 0-9 are now allowed (the old pattern skipped 0)
+// Digits 0-9 are allowed
 const usernamePattern = /^[a-z0-9_]{1,20}$/;
 
 let currentSession = null;
-let loadedUserId = null; // FIX: the user whose chat is currently loaded
+let loadedUserId = null; // the user whose chat is currently loaded
 let chatChannel = null;
 let activeRoom = "goldfish";
 
@@ -210,7 +210,7 @@ let allBadges = [];
 const REACTION_EMOJIS = ["👍", "😂", "🔥", "😮", "😢", "💯"];
 const reactionsByMsg = new Map(); // message id -> [{ user_id, emoji }]
 const reactionBars = new Map();   // message id -> reactions element
-const shownMessages = new Set();  // FIX: public message ids already on screen
+const shownMessages = new Set();  // public message ids already on screen
 
 // ---------- Dark mode ----------
 
@@ -291,7 +291,7 @@ signupButton.addEventListener("click", async () => {
         return;
     }
 
-    // FIX: no explicit updateAccount here; onAuthStateChange handles SIGNED_IN
+    // onAuthStateChange handles SIGNED_IN
     if (data.session) {
         status.textContent = "Account created!";
     } else {
@@ -320,7 +320,7 @@ loginButton.addEventListener("click", async () => {
         return;
     }
 
-    // FIX: no explicit updateAccount here; onAuthStateChange handles SIGNED_IN
+    // onAuthStateChange handles SIGNED_IN
 });
 
 // Log out
@@ -349,7 +349,7 @@ async function updateAccount(session) {
         return;
     }
 
-    // FIX: skip if this user's chat is already loaded (tab refocus re-fires SIGNED_IN)
+    // Skip if this user's chat is already loaded (tab refocus re-fires SIGNED_IN)
     if (loadedUserId === session.user.id) return;
     loadedUserId = session.user.id;
 
@@ -386,6 +386,21 @@ let viewedProfileId = null;
 let lastProfileError = "";
 let profileWarned = false;
 
+// Fallback when the database has no foreign key for the nested badge query
+async function loadBadgesSeparately(userId) {
+    const [owned, all] = await Promise.all([
+        db.from("user_badges").select("badge_key").eq("user_id", userId),
+        db.from("badges").select("key, label, icon, color")
+    ]);
+
+    const byKey = new Map((all.data || []).map((b) => [b.key, b]));
+
+    return (owned.data || []).map((r) => ({
+        badge_key: r.badge_key,
+        badges: byKey.get(r.badge_key) || null
+    }));
+}
+
 async function fetchProfile(userId) {
     const attempts = [
         "id, username, display_name, bio, avatar_url, banner_url, name_font, user_badges(badge_key, badges(label, icon, color))",
@@ -400,7 +415,10 @@ async function fetchProfile(userId) {
             .eq("id", userId)
             .single();
 
-        if (!error) return data;
+        if (!error) {
+            if (i > 0 && data) data.user_badges = await loadBadgesSeparately(userId);
+            return data;
+        }
 
         lastProfileError = error.message;
         console.error("Profile load failed:", error.message);
@@ -455,6 +473,7 @@ function renderBanner(el, profile) {
         const img = document.createElement("img");
         img.src = url;
         img.alt = "";
+        img.onerror = () => el.replaceChildren();
         el.appendChild(img);
     }
 }
@@ -494,7 +513,9 @@ function displayNameOf(profile) {
 function badgeList(profile) {
     return ((profile && profile.user_badges) || [])
         .map((b) => b.badges)
-        .filter(Boolean);
+        .filter(Boolean)
+        // the </> member badge always sits on the far left
+        .sort((a, b) => (a.icon === "code" ? 0 : 1) - (b.icon === "code" ? 0 : 1));
 }
 
 function renderBadges(container, profile) {
@@ -519,6 +540,11 @@ function renderAvatar(el, profile) {
         const img = document.createElement("img");
         img.src = url;
         img.alt = "";
+        const letter = ((profile && profile.username) || "?")[0].toUpperCase();
+        img.onerror = () => {
+            el.replaceChildren();
+            el.textContent = letter;
+        };
         el.appendChild(img);
     } else {
         el.textContent = ((profile && profile.username) || "?")[0].toUpperCase();
@@ -728,7 +754,14 @@ async function loadRoles() {
 async function renderModeration(userId, profile, isMine) {
     if (!isStaff || !profile) return;
 
-    const targetKeys = (profile.user_badges || []).map((b) => b.badge_key);
+    const { data: owned } = await db
+        .from("user_badges")
+        .select("badge_key")
+        .eq("user_id", userId);
+
+    if (viewedProfileId !== userId) return;
+
+    const targetKeys = (owned || []).map((b) => b.badge_key);
     const targetIsStaff = targetKeys.includes("owner") || targetKeys.includes("mod");
 
     // Owner: give or remove badges
@@ -913,7 +946,7 @@ function applyReaction(r, added) {
 
 // Display a message
 function displayMessage(msg) {
-    // FIX: don't show the same message twice (realtime vs. loadMessages race)
+    // Don't show the same message twice (realtime vs. loadMessages race)
     if (shownMessages.has(msg.id)) return;
     shownMessages.add(msg.id);
 
@@ -1438,13 +1471,36 @@ async function loadAdmin() {
         adminRooms.appendChild(button);
     });
 
-    const [profiles, bans, msgs] = await Promise.all([
+    let [profiles, bans, msgs] = await Promise.all([
         db.from("profiles")
             .select("id, username, display_name, user_badges(badge_key, badges(label, icon, color))")
             .order("username"),
         db.from("bans").select("user_id"),
         db.from("messages").select("id", { count: "exact", head: true })
     ]);
+
+    if (profiles.error) {
+        const plain = await db
+            .from("profiles")
+            .select("id, username, display_name")
+            .order("username");
+
+        if (!plain.error) {
+            const [ub, all] = await Promise.all([
+                db.from("user_badges").select("user_id, badge_key"),
+                db.from("badges").select("key, label, icon, color")
+            ]);
+            const byKey = new Map((all.data || []).map((b) => [b.key, b]));
+
+            plain.data.forEach((u) => {
+                u.user_badges = (ub.data || [])
+                    .filter((r) => r.user_id === u.id)
+                    .map((r) => ({ badge_key: r.badge_key, badges: byKey.get(r.badge_key) || null }));
+            });
+        }
+
+        profiles = plain;
+    }
 
     if (profiles.error) {
         adminStats.textContent = "Could not load users: " + profiles.error.message;
@@ -1641,8 +1697,8 @@ async function startChat() {
 }
 
 // Listen for login/logout changes.
-// FIX: don't await Supabase calls inside this callback (can deadlock), so
-// the work is deferred with setTimeout. updateAccount also ignores repeat
+// Don't await Supabase calls inside this callback (can deadlock), so the
+// work is deferred with setTimeout. updateAccount also ignores repeat
 // SIGNED_IN events for a user who is already loaded.
 db.auth.onAuthStateChange((event, session) => {
     if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
