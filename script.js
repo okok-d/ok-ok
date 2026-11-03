@@ -6,6 +6,122 @@ const db = window.supabase.createClient(
     SUPABASE_KEY
 );
 
+// Icons: positions in icons.png (column, row)
+const ICONS = {
+    "user": [0, 0],
+    "users": [1, 0],
+    "crown": [2, 0],
+    "shield-star": [3, 0],
+    "trophy": [4, 0],
+    "award": [5, 0],
+    "gift": [6, 0],
+    "gear": [7, 0],
+    "star": [8, 0],
+    "heart": [9, 0],
+    "diamond": [10, 0],
+    "fire": [11, 0],
+    "bolt": [12, 0],
+    "skull": [13, 0],
+    "shield-check": [14, 0],
+    "star-circle": [0, 1],
+    "crown-circle": [1, 1],
+    "flask": [2, 1],
+    "cart": [3, 1],
+    "calendar": [4, 1],
+    "clock": [5, 1],
+    "bars": [6, 1],
+    "target": [7, 1],
+    "bug": [8, 1],
+    "code": [9, 1],
+    "palette": [10, 1],
+    "wrench": [11, 1],
+    "hammer": [12, 1],
+    "tools": [13, 1],
+    "binoculars": [14, 1],
+    "search": [15, 1],
+    "emblem": [0, 2],
+    "chevrons-down": [1, 2],
+    "chevrons-up": [2, 2],
+    "star-badge": [3, 2],
+    "hexagon": [4, 2],
+    "layers": [5, 2],
+    "crown-2": [6, 2],
+    "laurel": [7, 2],
+    "wings-crown": [8, 2],
+    "wings-star": [9, 2],
+    "shield-star-2": [10, 2],
+    "shield-lock": [11, 2],
+    "cube-hex": [12, 2],
+    "cube": [13, 2],
+    "coins": [14, 2],
+    "ticket": [15, 2],
+    "ticket-star": [0, 3],
+    "ticket-crown": [1, 3],
+    "skull-bones": [2, 3],
+    "biohazard": [3, 3],
+    "radiation": [4, 3],
+    "snowflake": [5, 3],
+    "sun": [6, 3],
+    "moon": [7, 3],
+    "cloud": [8, 3],
+    "drop": [9, 3],
+    "leaf": [10, 3],
+    "paw": [11, 3],
+    "cat": [12, 3],
+    "bunny": [13, 3],
+    "creeper": [14, 3],
+    "pixel-heart": [15, 3],
+    "gamepad": [0, 4],
+    "monitor": [1, 4],
+    "phone": [2, 4],
+    "play": [3, 4],
+    "forward": [4, 4],
+    "rewind": [5, 4],
+    "pause": [6, 4],
+    "stop": [7, 4],
+    "record": [8, 4],
+    "volume": [9, 4],
+    "mute": [10, 4],
+    "bell": [11, 4],
+    "pin": [12, 4],
+    "location": [13, 4],
+    "flag": [14, 4],
+    "checkered-flag": [15, 4],
+    "tools-2": [0, 5],
+    "brush": [1, 5],
+    "pen-nib": [2, 5],
+    "camera": [3, 5],
+    "video": [4, 5],
+    "image": [5, 5],
+    "document": [6, 5],
+    "folder": [7, 5],
+    "chat": [8, 5],
+    "message": [9, 5],
+    "mail": [10, 5],
+    "question": [11, 5],
+    "warning": [12, 5],
+    "info": [13, 5],
+    "terminal": [14, 5],
+    "globe": [15, 5]
+};
+
+function makeIcon(name, color) {
+    const span = document.createElement("span");
+    span.className = "icon";
+
+    const pos = ICONS[name];
+
+    if (pos) {
+        const position = (pos[0] * 100 / 15) + "% " + (pos[1] * 100 / 5) + "%";
+        span.style.maskPosition = position;
+        span.style.webkitMaskPosition = position;
+    }
+
+    if (color) span.style.color = color;
+
+    return span;
+}
+
 // Account elements
 const signupArea = document.getElementById("signupArea");
 const loginArea = document.getElementById("loginArea");
@@ -90,7 +206,7 @@ const themeToggle = document.getElementById("themeToggle");
 
 function updateThemeLabel() {
     const dark = document.documentElement.dataset.theme === "dark";
-    themeToggle.textContent = dark ? "☀️ Light" : "🌙 Dark";
+    themeToggle.replaceChildren(makeIcon(dark ? "sun" : "moon"), dark ? " Light" : " Dark");
 }
 
 themeToggle.addEventListener("click", () => {
@@ -251,16 +367,43 @@ async function updateAccount(session) {
 const profileCache = new Map();
 let viewedProfileId = null;
 
+let lastProfileError = "";
+let profileWarned = false;
+
+async function fetchProfile(userId) {
+    const attempts = [
+        "id, username, display_name, bio, avatar_url, banner_url, name_font, user_badges(badge_key, badges(label, icon, color))",
+        "id, username, display_name, bio, avatar_url, banner_url, name_font",
+        "id, username, bio, avatar_url"
+    ];
+
+    for (let i = 0; i < attempts.length; i++) {
+        const { data, error } = await db
+            .from("profiles")
+            .select(attempts[i])
+            .eq("id", userId)
+            .single();
+
+        if (!error) return data;
+
+        lastProfileError = error.message;
+        console.error("Profile load failed:", error.message);
+
+        if (i === 0 && !profileWarned) {
+            profileWarned = true;
+            status.textContent =
+                "Profiles are in limited mode. Run the latest SQL in Supabase. (" +
+                error.message + ")";
+        }
+    }
+
+    return null;
+}
+
 function getProfile(userId, force = false) {
     if (!force && profileCache.has(userId)) return profileCache.get(userId);
 
-    const request = db
-        .from("profiles")
-        .select("id, username, display_name, bio, avatar_url, banner_url, name_font, user_badges(badge_key, badges(label, emoji, color))")
-        .eq("id", userId)
-        .single()
-        .then(({ data }) => data);
-
+    const request = fetchProfile(userId);
     profileCache.set(userId, request);
     return request;
 }
@@ -323,9 +466,7 @@ async function uploadImage(file, path) {
 }
 
 function postError(error) {
-    if (error.message && error.message.includes("row-level security")) {
-        return "You can't do that right now. You may be banned.";
-    }
+    if (isBanned) return "You are banned from posting.";
 
     return "Message failed: " + error.message;
 }
@@ -346,7 +487,7 @@ function renderBadges(container, profile) {
     badgeList(profile).forEach((b) => {
         const pill = document.createElement("span");
         pill.className = "pill";
-        pill.textContent = b.emoji + " " + b.label;
+        pill.append(makeIcon(b.icon), " " + b.label);
         pill.style.color = b.color;
         pill.style.borderColor = b.color;
         container.appendChild(pill);
@@ -390,6 +531,7 @@ async function openProfile(userId) {
 
     if (!profile) {
         profileName.textContent = "Profile not found";
+        profileBio.textContent = lastProfileError;
         return;
     }
 
@@ -545,7 +687,7 @@ async function loadRoles() {
     const [mine, ban, badges] = await Promise.all([
         db.from("user_badges").select("badge_key").eq("user_id", me),
         db.from("bans").select("user_id").eq("user_id", me),
-        db.from("badges").select("key, label, emoji, color")
+        db.from("badges").select("key, label, icon, color")
     ]);
 
     const keys = (mine.data || []).map((b) => b.badge_key);
@@ -579,7 +721,7 @@ async function renderModeration(userId, profile, isMine) {
 
             const button = document.createElement("button");
             button.className = "chip" + (has ? " mine" : "");
-            button.textContent = b.emoji + " " + b.label;
+            button.append(makeIcon(b.icon), " " + b.label);
             button.title = has ? "Click to remove" : "Click to give";
             button.disabled = isMine && b.key === "owner";
             button.addEventListener("click", () => toggleBadge(userId, b.key, has));
@@ -609,7 +751,7 @@ async function renderModeration(userId, profile, isMine) {
         if (data) {
             const pill = document.createElement("span");
             pill.className = "pill banned";
-            pill.textContent = "🚫 Banned";
+            pill.append(makeIcon("skull-bones"), " Banned");
             profileBadges.appendChild(pill);
         }
     }
@@ -801,7 +943,7 @@ function displayMessage(msg) {
         applyNameFont(name, profile);
 
         const badges = badgeList(profile);
-        tag.textContent = badges.map((b) => b.emoji).join("");
+        tag.replaceChildren(...badges.map((b) => makeIcon(b.icon, b.color)));
         tag.title = badges.map((b) => b.label).join(", ");
     });
 }
@@ -810,11 +952,20 @@ function displayMessage(msg) {
 async function loadMessages() {
     const room = activeRoom;
 
-    const { data, error } = await db
+    let { data, error } = await db
         .from("messages")
         .select("*, message_reactions(user_id, emoji)")
         .eq("room", room)
         .order("created_at", { ascending: true });
+
+    if (error) {
+        // Fall back to plain messages if reactions aren't set up yet
+        ({ data, error } = await db
+            .from("messages")
+            .select("*")
+            .eq("room", room)
+            .order("created_at", { ascending: true }));
+    }
 
     if (room !== activeRoom) return;
 
