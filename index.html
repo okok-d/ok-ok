@@ -40,27 +40,9 @@
             <div id="signupArea">
                 <h2>Create account</h2>
 
-                <input
-                    id="signupUsername"
-                    type="text"
-                    maxlength="20"
-                    placeholder="Username"
-                    autocomplete="username"
-                >
-
-                <input
-                    id="signupEmail"
-                    type="email"
-                    placeholder="Email"
-                    autocomplete="email"
-                >
-
-                <input
-                    id="signupPassword"
-                    type="password"
-                    placeholder="Password (at least 8 characters)"
-                    autocomplete="new-password"
-                >
+                <input id="signupUsername" type="text" maxlength="20" placeholder="Username" autocomplete="username">
+                <input id="signupEmail" type="email" placeholder="Email" autocomplete="email">
+                <input id="signupPassword" type="password" placeholder="Password (at least 8 characters)" autocomplete="new-password">
 
                 <button id="signupButton">Create account</button>
 
@@ -73,19 +55,8 @@
             <div id="loginArea" hidden>
                 <h2>Log in</h2>
 
-                <input
-                    id="loginEmail"
-                    type="email"
-                    placeholder="Email"
-                    autocomplete="email"
-                >
-
-                <input
-                    id="loginPassword"
-                    type="password"
-                    placeholder="Password"
-                    autocomplete="current-password"
-                >
+                <input id="loginEmail" type="email" placeholder="Email" autocomplete="email">
+                <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password">
 
                 <button id="loginButton">Log in</button>
 
@@ -125,19 +96,21 @@
                     <button class="room" data-room="hot-cheetos"># hot-cheetos</button>
                 </div>
 
+                <div id="onlineBar" class="online-bar"></div>
+
                 <div id="messages">
                     <p>Loading messages...</p>
                 </div>
 
-                <div class="input-area">
-                    <input
-                        id="message"
-                        type="text"
-                        maxlength="1000"
-                        placeholder="Write a message..."
-                        autocomplete="off"
-                    >
+                <div id="typing" class="typing"></div>
 
+                <div id="replyBar" class="reply-bar" hidden>
+                    <span id="replyText"></span>
+                    <button id="replyCancel">✕</button>
+                </div>
+
+                <div class="input-area">
+                    <input id="message" type="text" maxlength="1000" placeholder="Write a message..." autocomplete="off">
                     <button id="sendButton">Send</button>
                 </div>
             </div>
@@ -159,14 +132,7 @@
                     <div id="dmMessages"></div>
 
                     <div class="input-area">
-                        <input
-                            id="dmInput"
-                            type="text"
-                            maxlength="1000"
-                            placeholder="Write a private message..."
-                            autocomplete="off"
-                        >
-
+                        <input id="dmInput" type="text" maxlength="1000" placeholder="Write a private message..." autocomplete="off">
                         <button id="dmSendButton">Send</button>
                     </div>
                 </div>
@@ -181,12 +147,7 @@
                 <div id="adminRooms" class="rooms"></div>
 
                 <div class="input-area">
-                    <input
-                        id="adminSearch"
-                        type="text"
-                        placeholder="Search users..."
-                        autocomplete="off"
-                    >
+                    <input id="adminSearch" type="text" placeholder="Search users..." autocomplete="off">
                     <button id="adminRefresh">Refresh</button>
                 </div>
 
@@ -220,26 +181,13 @@
             </div>
 
             <div id="profileEdit" hidden>
-                <input
-                    id="displayNameInput"
-                    type="text"
-                    maxlength="30"
-                    placeholder="Display name (30 characters max)"
-                >
+                <input id="displayNameInput" type="text" maxlength="30" placeholder="Display name (30 characters max)">
 
                 <label class="field-label">Profile picture (PNG, JPG, WebP, GIF, 5 MB max)</label>
-                <input
-                    id="avatarFile"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                >
+                <input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
 
                 <label class="field-label">Banner (PNG, JPG, WebP, GIF, 5 MB max)</label>
-                <input
-                    id="bannerFile"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                >
+                <input id="bannerFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
 
                 <label class="field-label">Name font</label>
                 <select id="fontSelect">
@@ -256,11 +204,7 @@
                     <option value="special-elite">Special Elite (typewriter)</option>
                 </select>
 
-                <textarea
-                    id="bioInput"
-                    maxlength="300"
-                    placeholder="Write a bio (300 characters max)"
-                ></textarea>
+                <textarea id="bioInput" maxlength="300" placeholder="Write a bio (300 characters max)"></textarea>
 
                 <button id="saveProfile">Save profile</button>
             </div>
