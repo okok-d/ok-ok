@@ -61,12 +61,28 @@ const profileHandle = document.getElementById("profileHandle");
 const profileBadges = document.getElementById("profileBadges");
 const displayNameInput = document.getElementById("displayNameInput");
 const roomTabs = document.getElementById("roomTabs");
+const profileBanner = document.getElementById("profileBanner");
+const bannerFile = document.getElementById("bannerFile");
+const fontSelect = document.getElementById("fontSelect");
+const modSection = document.getElementById("modSection");
+const badgeManager = document.getElementById("badgeManager");
+const banButton = document.getElementById("banButton");
 
 const usernamePattern = /^[a-z1-9_]{1,20}$/;
 
 let currentSession = null;
 let chatChannel = null;
 let activeRoom = "goldfish";
+
+// Roles (these only control what buttons show; the database enforces the rules)
+let isStaff = false;
+let isOwner = false;
+let isBanned = false;
+let allBadges = [];
+
+const REACTION_EMOJIS = ["👍", "😂", "🔥", "😮", "😢", "💯"];
+const reactionsByMsg = new Map(); // message id -> [{ user_id, emoji }]
+const reactionBars = new Map();   // message id -> reactions element
 
 // ---------- Dark mode ----------
 
@@ -223,6 +239,7 @@ async function updateAccount(session) {
 
     currentUser.textContent = "Logged in as: " + profile.username;
 
+    await loadRoles();
     listenForDMs();
     await loadMessages();
     status.textContent = "Connected to chat!";
@@ -239,13 +256,78 @@ function getProfile(userId, force = false) {
 
     const request = db
         .from("profiles")
-        .select("id, username, display_name, bio, avatar_url, user_badges(badge_key, badges(label, emoji, color))")
+        .select("id, username, display_name, bio, avatar_url, banner_url, name_font, user_badges(badge_key, badges(label, emoji, color))")
         .eq("id", userId)
         .single()
         .then(({ data }) => data);
 
     profileCache.set(userId, request);
     return request;
+}
+
+// Name fonts (keys must match the database check and the dropdown)
+const FONTS = {
+    "pacifico": "'Pacifico', cursive",
+    "lobster": "'Lobster', cursive",
+    "permanent-marker": "'Permanent Marker', cursive",
+    "press-start": "'Press Start 2P', monospace",
+    "orbitron": "'Orbitron', sans-serif",
+    "creepster": "'Creepster', cursive",
+    "bungee": "'Bungee', sans-serif",
+    "caveat": "'Caveat', cursive",
+    "dancing-script": "'Dancing Script', cursive",
+    "special-elite": "'Special Elite', monospace"
+};
+
+function applyNameFont(el, profile) {
+    el.style.fontFamily = FONTS[profile && profile.name_font] || "";
+}
+
+function updateFontPreview() {
+    displayNameInput.style.fontFamily = FONTS[fontSelect.value] || "";
+}
+
+function renderBanner(el, profile) {
+    el.replaceChildren();
+    const url = profile && profile.banner_url;
+
+    // Only trust images from your own Supabase storage
+    if (url && url.startsWith(SUPABASE_URL + "/storage/")) {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = "";
+        el.appendChild(img);
+    }
+}
+
+// Upload an image to the avatars bucket; returns its public URL or null
+async function uploadImage(file, path) {
+    const allowed = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+    if (!allowed.includes(file.type) || file.size > 5 * 1024 * 1024) {
+        status.textContent = "Images must be PNG, JPG, WebP, or GIF under 5 MB.";
+        return null;
+    }
+
+    const { error } = await db.storage
+        .from("avatars")
+        .upload(path, file, { upsert: true, contentType: file.type });
+
+    if (error) {
+        status.textContent = "Upload failed: " + error.message;
+        return null;
+    }
+
+    const { data } = db.storage.from("avatars").getPublicUrl(path);
+    return data.publicUrl + "?v=" + Date.now(); // bust cache
+}
+
+function postError(error) {
+    if (error.message && error.message.includes("row-level security")) {
+        return "You can't do that right now. You may be banned.";
+    }
+
+    return "Message failed: " + error.message;
 }
 
 function displayNameOf(profile) {
@@ -294,6 +376,11 @@ async function openProfile(userId) {
     profileAvatar.replaceChildren();
     profileHandle.textContent = "";
     profileBadges.replaceChildren();
+    profileBanner.replaceChildren();
+    profileName.style.fontFamily = "";
+    modSection.hidden = true;
+    badgeManager.hidden = true;
+    banButton.hidden = true;
     profileEdit.hidden = true;
     messageButton.hidden = true;
 
@@ -307,7 +394,9 @@ async function openProfile(userId) {
     }
 
     renderAvatar(profileAvatar, profile);
+    renderBanner(profileBanner, profile);
     profileName.textContent = displayNameOf(profile);
+    applyNameFont(profileName, profile);
     profileHandle.textContent = "@" + profile.username;
     renderBadges(profileBadges, profile);
     profileBio.textContent = profile.bio || "No bio yet.";
@@ -318,9 +407,14 @@ async function openProfile(userId) {
 
     if (isMine) {
         displayNameInput.value = profile.display_name || "";
+        fontSelect.value = profile.name_font || "";
+        bannerFile.value = "";
+        updateFontPreview();
         bioInput.value = profile.bio || "";
         avatarFile.value = "";
     }
+
+    await renderModeration(userId, profile, isMine);
 }
 
 async function saveProfile() {
@@ -329,7 +423,8 @@ async function saveProfile() {
     const userId = currentSession.user.id;
     const updates = {
         display_name: displayNameInput.value.trim().slice(0, 30) || null,
-        bio: bioInput.value.trim().slice(0, 300)
+        bio: bioInput.value.trim().slice(0, 300),
+        name_font: fontSelect.value || null
     };
     const file = avatarFile.files[0];
 
@@ -358,6 +453,19 @@ async function saveProfile() {
 
         const { data } = db.storage.from("avatars").getPublicUrl(path);
         updates.avatar_url = data.publicUrl + "?v=" + Date.now(); // bust cache
+    }
+
+    const bannerChosen = bannerFile.files[0];
+
+    if (bannerChosen) {
+        const bannerUrl = await uploadImage(bannerChosen, userId + "/banner");
+
+        if (!bannerUrl) {
+            saveProfileButton.disabled = false;
+            return;
+        }
+
+        updates.banner_url = bannerUrl;
     }
 
     const { error } = await db
@@ -389,6 +497,33 @@ messageButton.addEventListener("click", () => {
 });
 
 saveProfileButton.addEventListener("click", saveProfile);
+fontSelect.addEventListener("change", updateFontPreview);
+
+banButton.addEventListener("click", async () => {
+    if (!viewedProfileId || !currentSession) return;
+
+    const userId = viewedProfileId;
+    const banned = banButton.dataset.banned === "1";
+
+    banButton.disabled = true;
+
+    const { error } = banned
+        ? await db.from("bans").delete().eq("user_id", userId)
+        : await db.from("bans").insert({
+            user_id: userId,
+            banned_by: currentSession.user.id
+        });
+
+    banButton.disabled = false;
+
+    if (error) {
+        status.textContent = "Moderation failed: " + error.message;
+        return;
+    }
+
+    status.textContent = banned ? "User unbanned." : "User banned.";
+    openProfile(userId);
+});
 
 document.getElementById("closeProfile").addEventListener("click", () => {
     profileModal.hidden = true;
@@ -402,12 +537,215 @@ document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") profileModal.hidden = true;
 });
 
+// ---------- Roles, moderation, badges ----------
+
+async function loadRoles() {
+    const me = currentSession.user.id;
+
+    const [mine, ban, badges] = await Promise.all([
+        db.from("user_badges").select("badge_key").eq("user_id", me),
+        db.from("bans").select("user_id").eq("user_id", me),
+        db.from("badges").select("key, label, emoji, color")
+    ]);
+
+    const keys = (mine.data || []).map((b) => b.badge_key);
+
+    isOwner = keys.includes("owner");
+    isStaff = isOwner || keys.includes("mod");
+    isBanned = !!(ban.data && ban.data.length);
+    allBadges = badges.data || [];
+
+    input.disabled = isBanned;
+    sendButton.disabled = isBanned;
+    dmInput.disabled = isBanned;
+    dmSendButton.disabled = isBanned;
+
+    if (isBanned) status.textContent = "You are banned from posting.";
+}
+
+// Moderation tools inside the profile card (staff only)
+async function renderModeration(userId, profile, isMine) {
+    if (!isStaff || !profile) return;
+
+    const targetKeys = (profile.user_badges || []).map((b) => b.badge_key);
+    const targetIsStaff = targetKeys.includes("owner") || targetKeys.includes("mod");
+
+    // Owner: give or remove badges
+    if (isOwner) {
+        badgeManager.replaceChildren();
+
+        allBadges.forEach((b) => {
+            const has = targetKeys.includes(b.key);
+
+            const button = document.createElement("button");
+            button.className = "chip" + (has ? " mine" : "");
+            button.textContent = b.emoji + " " + b.label;
+            button.title = has ? "Click to remove" : "Click to give";
+            button.disabled = isMine && b.key === "owner";
+            button.addEventListener("click", () => toggleBadge(userId, b.key, has));
+
+            badgeManager.appendChild(button);
+        });
+
+        badgeManager.hidden = false;
+        modSection.hidden = false;
+    }
+
+    // Owner and mods: ban or unban non-staff users
+    if (!isMine && !targetIsStaff) {
+        const { data } = await db
+            .from("bans")
+            .select("user_id")
+            .eq("user_id", userId)
+            .maybeSingle();
+
+        if (viewedProfileId !== userId) return;
+
+        banButton.dataset.banned = data ? "1" : "";
+        banButton.textContent = data ? "Unban user" : "Ban user";
+        banButton.hidden = false;
+        modSection.hidden = false;
+
+        if (data) {
+            const pill = document.createElement("span");
+            pill.className = "pill banned";
+            pill.textContent = "🚫 Banned";
+            profileBadges.appendChild(pill);
+        }
+    }
+}
+
+async function toggleBadge(userId, key, has) {
+    const { error } = has
+        ? await db.from("user_badges").delete().eq("user_id", userId).eq("badge_key", key)
+        : await db.from("user_badges").insert({ user_id: userId, badge_key: key });
+
+    if (error) {
+        status.textContent = "Badge change failed: " + error.message;
+        return;
+    }
+
+    profileCache.delete(userId);
+    await openProfile(userId);
+    await loadMessages();
+}
+
+// ---------- Deleting messages and reactions ----------
+
+async function deleteMessage(id) {
+    const { data, error } = await db
+        .from("messages")
+        .delete()
+        .eq("id", id)
+        .select();
+
+    if (error) {
+        status.textContent = "Delete failed: " + error.message;
+        return;
+    }
+
+    if (!data || data.length === 0) {
+        status.textContent = "You can't delete that message.";
+        return;
+    }
+
+    removeMessage(id);
+}
+
+function removeMessage(id) {
+    const el = messages.querySelector('.message[data-id="' + CSS.escape(String(id)) + '"]');
+    if (el) el.remove();
+
+    reactionBars.delete(id);
+    reactionsByMsg.delete(id);
+}
+
+function renderReactions(msgId) {
+    const bar = reactionBars.get(msgId);
+    if (!bar) return;
+
+    const me = currentSession ? currentSession.user.id : null;
+    const list = reactionsByMsg.get(msgId) || [];
+
+    bar.replaceChildren();
+
+    REACTION_EMOJIS.forEach((emoji) => {
+        const people = list.filter((r) => r.emoji === emoji);
+        if (people.length === 0) return;
+
+        const chip = document.createElement("button");
+        chip.className = "chip" + (people.some((r) => r.user_id === me) ? " mine" : "");
+        chip.textContent = emoji + " " + people.length;
+        chip.addEventListener("click", () => toggleReaction(msgId, emoji));
+        bar.appendChild(chip);
+    });
+
+    // "+" opens the emoji choices
+    const add = document.createElement("button");
+    add.className = "chip add";
+    add.textContent = "+";
+    add.title = "Add reaction";
+
+    add.addEventListener("click", () => {
+        add.remove();
+
+        REACTION_EMOJIS.forEach((emoji) => {
+            const option = document.createElement("button");
+            option.className = "chip";
+            option.textContent = emoji;
+            option.addEventListener("click", () => toggleReaction(msgId, emoji));
+            bar.appendChild(option);
+        });
+    });
+
+    bar.appendChild(add);
+}
+
+async function toggleReaction(msgId, emoji) {
+    if (!currentSession) return;
+
+    const me = currentSession.user.id;
+    const list = reactionsByMsg.get(msgId) || [];
+    const has = list.some((r) => r.user_id === me && r.emoji === emoji);
+
+    const { error } = has
+        ? await db
+            .from("message_reactions")
+            .delete()
+            .eq("message_id", msgId)
+            .eq("user_id", me)
+            .eq("emoji", emoji)
+        : await db
+            .from("message_reactions")
+            .insert({ message_id: msgId, user_id: me, emoji: emoji });
+
+    if (error) {
+        status.textContent = postError(error);
+        return;
+    }
+
+    applyReaction({ message_id: msgId, user_id: me, emoji: emoji }, !has);
+}
+
+function applyReaction(r, added) {
+    const list = reactionsByMsg.get(r.message_id);
+    if (!list) return; // that message isn't in the room you're viewing
+
+    const index = list.findIndex((x) => x.user_id === r.user_id && x.emoji === r.emoji);
+
+    if (added && index === -1) list.push({ user_id: r.user_id, emoji: r.emoji });
+    if (!added && index !== -1) list.splice(index, 1);
+
+    renderReactions(r.message_id);
+}
+
 // ---------- Public messages ----------
 
 // Display a message
 function displayMessage(msg) {
     const item = document.createElement("div");
     item.className = "message";
+    item.dataset.id = msg.id;
 
     const avatar = document.createElement("div");
     avatar.className = "avatar";
@@ -433,7 +771,24 @@ function displayMessage(msg) {
 
     const line = document.createElement("div");
     line.append(name, tag, text);
-    body.append(line, time);
+    // Delete button (your own messages, or any message if you're staff)
+    if (currentSession && (msg.user_id === currentSession.user.id || isStaff)) {
+        const del = document.createElement("button");
+        del.className = "icon-btn";
+        del.textContent = "🗑";
+        del.title = "Delete message";
+        del.addEventListener("click", () => deleteMessage(msg.id));
+        line.appendChild(del);
+    }
+
+    // Reactions
+    const reactBar = document.createElement("div");
+    reactBar.className = "reactions";
+    reactionBars.set(msg.id, reactBar);
+    reactionsByMsg.set(msg.id, msg.message_reactions || []);
+    renderReactions(msg.id);
+
+    body.append(line, time, reactBar);
     item.append(avatar, body);
 
     messages.appendChild(item);
@@ -443,6 +798,7 @@ function displayMessage(msg) {
     getProfile(msg.user_id).then((profile) => {
         renderAvatar(avatar, profile);
         if (profile) name.textContent = displayNameOf(profile);
+        applyNameFont(name, profile);
 
         const badges = badgeList(profile);
         tag.textContent = badges.map((b) => b.emoji).join("");
@@ -456,7 +812,7 @@ async function loadMessages() {
 
     const { data, error } = await db
         .from("messages")
-        .select("*")
+        .select("*, message_reactions(user_id, emoji)")
         .eq("room", room)
         .order("created_at", { ascending: true });
 
@@ -468,6 +824,8 @@ async function loadMessages() {
         return;
     }
 
+    reactionsByMsg.clear();
+    reactionBars.clear();
     messages.replaceChildren();
     data.forEach(displayMessage);
 }
@@ -494,7 +852,7 @@ async function sendMessage() {
         });
 
     if (error) {
-        status.textContent = "Message failed: " + error.message;
+        status.textContent = postError(error);
         console.error(error);
     } else {
         input.value = "";
@@ -529,6 +887,21 @@ function listenForMessages() {
             (payload) => {
                 if (payload.new.room === activeRoom) displayMessage(payload.new);
             }
+        )
+        .on(
+            "postgres_changes",
+            { event: "DELETE", schema: "public", table: "messages" },
+            (payload) => removeMessage(payload.old.id)
+        )
+        .on(
+            "postgres_changes",
+            { event: "INSERT", schema: "public", table: "message_reactions" },
+            (payload) => applyReaction(payload.new, true)
+        )
+        .on(
+            "postgres_changes",
+            { event: "DELETE", schema: "public", table: "message_reactions" },
+            (payload) => applyReaction(payload.old, false)
         )
         .subscribe((state) => {
             console.log("Realtime:", state);
@@ -672,6 +1045,7 @@ async function loadConversations() {
         getProfile(otherId).then((profile) => {
             renderAvatar(avatar, profile);
             name.textContent = profile ? displayNameOf(profile) : "Unknown";
+            applyNameFont(name, profile);
         });
     });
 }
@@ -699,6 +1073,7 @@ async function openConversation(userId) {
     if (activeDM !== userId) return;
 
     dmHeaderName.textContent = profile ? displayNameOf(profile) : "Unknown";
+    applyNameFont(dmHeaderName, profile);
     renderAvatar(dmHeaderAvatar, profile);
 
     const { data, error } = await db
@@ -764,7 +1139,7 @@ async function sendDM() {
     dmSendButton.disabled = false;
 
     if (error) {
-        status.textContent = "Message failed: " + error.message;
+        status.textContent = postError(error);
         console.error(error);
         return;
     }
@@ -819,6 +1194,13 @@ function listenForDMs() {
 }
 
 function resetDMs() {
+    isStaff = false;
+    isOwner = false;
+    isBanned = false;
+    input.disabled = false;
+    sendButton.disabled = false;
+    dmInput.disabled = false;
+    dmSendButton.disabled = false;
     activeDM = null;
     unreadFrom.clear();
     shownDMs.clear();
