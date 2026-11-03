@@ -30,6 +30,22 @@ const sendButton = document.getElementById("sendButton");
 const currentUser = document.getElementById("currentUser");
 const status = document.getElementById("status");
 
+// Tabs and DM elements
+const tabPublic = document.getElementById("tabPublic");
+const tabDMs = document.getElementById("tabDMs");
+const dmBadge = document.getElementById("dmBadge");
+const publicPanel = document.getElementById("publicPanel");
+const dmPanel = document.getElementById("dmPanel");
+const dmListView = document.getElementById("dmListView");
+const dmList = document.getElementById("dmList");
+const dmChatView = document.getElementById("dmChatView");
+const dmBack = document.getElementById("dmBack");
+const dmHeaderAvatar = document.getElementById("dmHeaderAvatar");
+const dmHeaderName = document.getElementById("dmHeaderName");
+const dmMessages = document.getElementById("dmMessages");
+const dmInput = document.getElementById("dmInput");
+const dmSendButton = document.getElementById("dmSendButton");
+
 // Profile elements
 const profileModal = document.getElementById("profileModal");
 const profileAvatar = document.getElementById("profileAvatar");
@@ -40,11 +56,40 @@ const avatarFile = document.getElementById("avatarFile");
 const bioInput = document.getElementById("bioInput");
 const saveProfileButton = document.getElementById("saveProfile");
 const myProfileButton = document.getElementById("myProfileButton");
+const messageButton = document.getElementById("messageButton");
 
 const usernamePattern = /^[a-z1-9_]{1,20}$/;
 
 let currentSession = null;
 let chatChannel = null;
+
+// ---------- Dark mode ----------
+
+const themeToggle = document.getElementById("themeToggle");
+
+function updateThemeLabel() {
+    const dark = document.documentElement.dataset.theme === "dark";
+    themeToggle.textContent = dark ? "☀️ Light" : "🌙 Dark";
+}
+
+themeToggle.addEventListener("click", () => {
+    const next =
+        document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+
+    document.documentElement.dataset.theme = next;
+
+    try {
+        localStorage.setItem("theme", next);
+    } catch (e) {
+        // Storage can be blocked; the theme still changes for this visit
+    }
+
+    updateThemeLabel();
+});
+
+updateThemeLabel();
+
+// ---------- Sign up / log in ----------
 
 // Switch between signup and login
 document.getElementById("showLogin").addEventListener("click", (event) => {
@@ -139,6 +184,7 @@ logoutButton.addEventListener("click", async () => {
 
     currentSession = null;
     profileModal.hidden = true;
+    resetDMs();
     authArea.hidden = false;
     chatArea.hidden = true;
     status.textContent = "Logged out.";
@@ -149,6 +195,7 @@ async function updateAccount(session) {
     currentSession = session;
 
     if (!session) {
+        resetDMs();
         authArea.hidden = false;
         chatArea.hidden = true;
         return;
@@ -171,6 +218,7 @@ async function updateAccount(session) {
 
     currentUser.textContent = "Logged in as: " + profile.username;
 
+    listenForDMs();
     await loadMessages();
     status.textContent = "Connected to chat!";
 }
@@ -179,6 +227,7 @@ async function updateAccount(session) {
 
 // Cache so each profile is only fetched once
 const profileCache = new Map();
+let viewedProfileId = null;
 
 function getProfile(userId, force = false) {
     if (!force && profileCache.has(userId)) return profileCache.get(userId);
@@ -210,13 +259,17 @@ function renderAvatar(el, profile) {
 }
 
 async function openProfile(userId) {
+    viewedProfileId = userId;
     profileModal.hidden = false;
     profileName.textContent = "Loading...";
     profileBio.textContent = "";
     profileAvatar.replaceChildren();
     profileEdit.hidden = true;
+    messageButton.hidden = true;
 
     const profile = await getProfile(userId, true);
+
+    if (viewedProfileId !== userId) return;
 
     if (!profile) {
         profileName.textContent = "Profile not found";
@@ -229,6 +282,7 @@ async function openProfile(userId) {
 
     const isMine = currentSession && currentSession.user.id === userId;
     profileEdit.hidden = !isMine;
+    messageButton.hidden = isMine || !currentSession;
 
     if (isMine) {
         bioInput.value = profile.bio || "";
@@ -246,10 +300,10 @@ async function saveProfile() {
     saveProfileButton.disabled = true;
 
     if (file) {
-        const allowed = ["image/png", "image/jpeg", "image/webp"];
+        const allowed = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
-        if (!allowed.includes(file.type) || file.size > 2 * 1024 * 1024) {
-            status.textContent = "Avatar must be a PNG, JPG, or WebP under 2 MB.";
+        if (!allowed.includes(file.type) || file.size > 5 * 1024 * 1024) {
+            status.textContent = "Avatar must be a PNG, JPG, WebP, or GIF under 5 MB.";
             saveProfileButton.disabled = false;
             return;
         }
@@ -292,6 +346,12 @@ myProfileButton.addEventListener("click", () => {
     if (currentSession) openProfile(currentSession.user.id);
 });
 
+messageButton.addEventListener("click", () => {
+    if (!viewedProfileId) return;
+    profileModal.hidden = true;
+    openConversation(viewedProfileId);
+});
+
 saveProfileButton.addEventListener("click", saveProfile);
 
 document.getElementById("closeProfile").addEventListener("click", () => {
@@ -306,7 +366,7 @@ document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") profileModal.hidden = true;
 });
 
-// ---------- Messages ----------
+// ---------- Public messages ----------
 
 // Display a message
 function displayMessage(msg) {
@@ -435,6 +495,279 @@ function listenForMessages() {
             }
         });
 }
+
+// ---------- Direct messages ----------
+
+let activeDM = null;          // user id of the open conversation
+let dmChannel = null;
+const unreadFrom = new Set(); // user ids with unread messages (this visit only)
+const shownDMs = new Set();   // message ids already on screen
+
+function updateBadge() {
+    dmBadge.hidden = unreadFrom.size === 0;
+    dmBadge.textContent = unreadFrom.size;
+}
+
+function switchPanel(showDMs) {
+    publicPanel.hidden = showDMs;
+    dmPanel.hidden = !showDMs;
+    tabPublic.classList.toggle("active", !showDMs);
+    tabDMs.classList.toggle("active", showDMs);
+}
+
+tabPublic.addEventListener("click", () => switchPanel(false));
+
+tabDMs.addEventListener("click", () => {
+    if (activeDM) {
+        openConversation(activeDM);
+    } else {
+        loadConversations();
+    }
+});
+
+dmBack.addEventListener("click", () => loadConversations());
+
+// Show the list of people you've talked to
+async function loadConversations() {
+    if (!currentSession) return;
+
+    switchPanel(true);
+    activeDM = null;
+    dmListView.hidden = false;
+    dmChatView.hidden = true;
+
+    const me = currentSession.user.id;
+
+    const { data, error } = await db
+        .from("direct_messages")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500);
+
+    if (error) {
+        status.textContent = "Could not load DMs: " + error.message;
+        console.error(error);
+        return;
+    }
+
+    // Keep only the newest message per person
+    const latest = new Map();
+
+    data.forEach((m) => {
+        const other = m.sender_id === me ? m.recipient_id : m.sender_id;
+        if (!latest.has(other)) latest.set(other, m);
+    });
+
+    dmList.replaceChildren();
+
+    if (latest.size === 0) {
+        const empty = document.createElement("p");
+        empty.className = "dm-empty";
+        empty.textContent =
+            "No conversations yet. Click a username in the public chat and press Message.";
+        dmList.appendChild(empty);
+        return;
+    }
+
+    latest.forEach((last, otherId) => {
+        const row = document.createElement("button");
+        row.className = "dm-row";
+
+        const avatar = document.createElement("div");
+        avatar.className = "avatar";
+        avatar.textContent = "?";
+
+        const textBox = document.createElement("div");
+        textBox.className = "dm-text";
+
+        const name = document.createElement("strong");
+        name.textContent = "Loading...";
+
+        const preview = document.createElement("span");
+        preview.className = "dm-preview";
+        preview.textContent =
+            (last.sender_id === me ? "You: " : "") + last.content;
+
+        textBox.append(name, preview);
+        row.append(avatar, textBox);
+
+        if (unreadFrom.has(otherId)) {
+            const dot = document.createElement("span");
+            dot.className = "badge";
+            dot.textContent = "new";
+            row.appendChild(dot);
+        }
+
+        row.addEventListener("click", () => openConversation(otherId));
+        dmList.appendChild(row);
+
+        getProfile(otherId).then((profile) => {
+            renderAvatar(avatar, profile);
+            name.textContent = profile ? profile.username : "Unknown";
+        });
+    });
+}
+
+// Show one conversation
+async function openConversation(userId) {
+    if (!currentSession) return;
+
+    const me = currentSession.user.id;
+
+    activeDM = userId;
+    unreadFrom.delete(userId);
+    updateBadge();
+
+    switchPanel(true);
+    dmListView.hidden = true;
+    dmChatView.hidden = false;
+    dmMessages.replaceChildren();
+    shownDMs.clear();
+    dmHeaderName.textContent = "Loading...";
+    dmHeaderAvatar.replaceChildren();
+
+    const profile = await getProfile(userId);
+
+    if (activeDM !== userId) return;
+
+    dmHeaderName.textContent = profile ? profile.username : "Unknown";
+    renderAvatar(dmHeaderAvatar, profile);
+
+    const { data, error } = await db
+        .from("direct_messages")
+        .select("*")
+        .or(
+            "and(sender_id.eq." + me + ",recipient_id.eq." + userId + ")," +
+            "and(sender_id.eq." + userId + ",recipient_id.eq." + me + ")"
+        )
+        .order("created_at", { ascending: true });
+
+    if (activeDM !== userId) return;
+
+    if (error) {
+        status.textContent = "Could not load messages: " + error.message;
+        console.error(error);
+        return;
+    }
+
+    data.forEach(displayDM);
+    dmInput.focus();
+}
+
+function displayDM(m) {
+    if (shownDMs.has(m.id)) return;
+    shownDMs.add(m.id);
+
+    const mine = currentSession && m.sender_id === currentSession.user.id;
+
+    const item = document.createElement("div");
+    item.className = "message dm-msg" + (mine ? " mine" : "");
+
+    const text = document.createElement("div");
+    text.textContent = m.content;
+
+    const time = document.createElement("small");
+    time.textContent = new Date(m.created_at).toLocaleString();
+
+    item.append(text, time);
+    dmMessages.appendChild(item);
+    dmMessages.scrollTop = dmMessages.scrollHeight;
+}
+
+async function sendDM() {
+    if (!currentSession || !activeDM) return;
+
+    const content = dmInput.value.trim();
+
+    if (!content || content.length > 1000) return;
+
+    dmSendButton.disabled = true;
+
+    const { data, error } = await db
+        .from("direct_messages")
+        .insert({
+            sender_id: currentSession.user.id,
+            recipient_id: activeDM,
+            content: content
+        })
+        .select()
+        .single();
+
+    dmSendButton.disabled = false;
+
+    if (error) {
+        status.textContent = "Message failed: " + error.message;
+        console.error(error);
+        return;
+    }
+
+    dmInput.value = "";
+    displayDM(data);
+    dmInput.focus();
+}
+
+dmSendButton.addEventListener("click", sendDM);
+
+dmInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") sendDM();
+});
+
+// Live direct messages (only rows you sent or received arrive)
+function listenForDMs() {
+    if (dmChannel) return;
+
+    dmChannel = db
+        .channel("direct-messages")
+        .on(
+            "postgres_changes",
+            {
+                event: "INSERT",
+                schema: "public",
+                table: "direct_messages"
+            },
+            (payload) => {
+                if (!currentSession) return;
+
+                const m = payload.new;
+                const me = currentSession.user.id;
+
+                if (m.sender_id !== me && m.recipient_id !== me) return;
+
+                const other = m.sender_id === me ? m.recipient_id : m.sender_id;
+                const viewing = !dmPanel.hidden && activeDM === other;
+
+                if (viewing) {
+                    displayDM(m);
+                } else if (m.recipient_id === me) {
+                    unreadFrom.add(other);
+                    updateBadge();
+                }
+
+                // Refresh the list if it's showing
+                if (!dmPanel.hidden && dmChatView.hidden) loadConversations();
+            }
+        )
+        .subscribe();
+}
+
+function resetDMs() {
+    activeDM = null;
+    unreadFrom.clear();
+    shownDMs.clear();
+    updateBadge();
+    dmList.replaceChildren();
+    dmMessages.replaceChildren();
+    dmListView.hidden = false;
+    dmChatView.hidden = true;
+    switchPanel(false);
+
+    if (dmChannel) {
+        db.removeChannel(dmChannel);
+        dmChannel = null;
+    }
+}
+
+// ---------- Startup ----------
 
 // Restore login when page opens
 async function startChat() {
