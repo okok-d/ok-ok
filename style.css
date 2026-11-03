@@ -1,17 +1,58 @@
+:root {
+    --bg: #ffffff;
+    --fg: #000000;
+    --border: #000000;
+    --line: #dddddd;
+    --muted: #777777;
+    --faint: #888888;
+    --field: #cccccc;
+    --hover: #eeeeee;
+    --avatar: #dddddd;
+    --avatar-fg: #555555;
+    --mine: #f0f0f0;
+    --link: #0066cc;
+    --overlay: rgba(0, 0, 0, 0.5);
+    color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+    --bg: #121212;
+    --fg: #eeeeee;
+    --border: #555555;
+    --line: #333333;
+    --muted: #999999;
+    --faint: #888888;
+    --field: #444444;
+    --hover: #2a2a2a;
+    --avatar: #333333;
+    --avatar-fg: #cccccc;
+    --mine: #1e1e1e;
+    --link: #66ccff;
+    --overlay: rgba(0, 0, 0, 0.7);
+    color-scheme: dark;
+}
+
 * {
     box-sizing: border-box;
 }
 
 body {
     margin: 0;
-    background: white;
-    color: black;
+    background: var(--bg);
+    color: var(--fg);
     font-family: Arial, sans-serif;
 }
 
+a {
+    color: var(--link);
+}
+
 header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     padding: 15px;
-    border-bottom: 1px solid #ddd;
+    border-bottom: 1px solid var(--line);
 }
 
 header h1 {
@@ -21,7 +62,7 @@ header h1 {
 
 header p {
     margin: 5px 0 0;
-    color: #777;
+    color: var(--muted);
     font-size: 13px;
 }
 
@@ -31,60 +72,32 @@ main {
     padding: 10px;
 }
 
-#messages {
-    height: 400px;
-    overflow-y: auto;
-    padding: 10px 0;
-    border-bottom: 1px solid #ddd;
-}
-
-.message {
-    display: flex;
-    gap: 10px;
-    background-color: white;
-    border: 1px solid black;
-    padding: 10px;
-    margin-bottom: 10px;
-    overflow-wrap: anywhere;
-}
-
-.message-body {
-    flex: 1;
-    min-width: 0;
-}
-
-.message small {
-    display: block;
-    color: #888;
-    font-size: 11px;
-    margin-top: 5px;
-}
-
-.input-area {
-    display: flex;
-    gap: 8px;
-    margin-top: 12px;
+input,
+textarea {
+    background: var(--bg);
+    color: var(--fg);
 }
 
 input {
     flex: 1;
     min-width: 0;
     padding: 10px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--field);
     border-radius: 0;
     font-size: 14px;
 }
 
 button {
     padding: 10px 18px;
-    border: 1px solid black;
-    background: white;
-    color: black;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
     cursor: pointer;
+    font-size: 14px;
 }
 
 button:hover {
-    background: #eee;
+    background: var(--hover);
 }
 
 button:disabled {
@@ -93,7 +106,7 @@ button:disabled {
 }
 
 #status {
-    color: #888;
+    color: var(--faint);
     font-size: 12px;
 }
 
@@ -109,6 +122,129 @@ button:disabled {
     flex: 1;
 }
 
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.tab {
+    flex: 1;
+}
+
+.tab.active {
+    background: var(--fg);
+    color: var(--bg);
+}
+
+.badge {
+    display: inline-block;
+    min-width: 18px;
+    padding: 1px 6px;
+    margin-left: 4px;
+    border-radius: 9px;
+    background: #e53935;
+    color: white;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.badge[hidden] {
+    display: none;
+}
+
+/* Messages */
+#messages,
+#dmMessages {
+    height: 400px;
+    overflow-y: auto;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+#dmMessages {
+    display: flex;
+    flex-direction: column;
+    height: 350px;
+}
+
+.message {
+    display: flex;
+    gap: 10px;
+    background-color: var(--bg);
+    border: 1px solid var(--border);
+    padding: 10px;
+    margin-bottom: 10px;
+    overflow-wrap: anywhere;
+}
+
+.message-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.message small {
+    display: block;
+    color: var(--faint);
+    font-size: 11px;
+    margin-top: 5px;
+}
+
+.dm-msg {
+    display: block;
+    max-width: 80%;
+    align-self: flex-start;
+}
+
+.dm-msg.mine {
+    align-self: flex-end;
+    background: var(--mine);
+}
+
+.input-area {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+/* Direct message list */
+.dm-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 8px;
+    text-align: left;
+}
+
+.dm-row .dm-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.dm-row .dm-preview {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dm-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.dm-empty {
+    color: var(--muted);
+}
+
 /* Avatars */
 .avatar {
     width: 36px;
@@ -116,8 +252,8 @@ button:disabled {
     flex-shrink: 0;
     border-radius: 50%;
     overflow: hidden;
-    background: #ddd;
-    color: #555;
+    background: var(--avatar);
+    color: var(--avatar-fg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -139,6 +275,11 @@ button:disabled {
     cursor: default;
 }
 
+.dm-row .avatar,
+.dm-header .avatar {
+    cursor: inherit;
+}
+
 .name-link {
     border: none;
     background: none;
@@ -156,7 +297,7 @@ button:disabled {
 .modal {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -169,8 +310,8 @@ button:disabled {
 
 .modal-card {
     position: relative;
-    background: white;
-    border: 1px solid black;
+    background: var(--bg);
+    border: 1px solid var(--border);
     padding: 20px;
     width: min(380px, 92vw);
     text-align: center;
@@ -193,12 +334,13 @@ button:disabled {
     flex-direction: column;
     gap: 8px;
     text-align: left;
+    margin-top: 12px;
 }
 
 #bioInput {
     min-height: 80px;
     padding: 10px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--field);
     font: inherit;
     font-size: 14px;
     resize: vertical;
@@ -209,7 +351,7 @@ button:disabled {
         flex-wrap: wrap;
     }
 
-    #username {
-        flex-basis: 100%;
+    .tab {
+        padding: 10px 6px;
     }
 }
