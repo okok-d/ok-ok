@@ -355,3 +355,56 @@ button:disabled {
         padding: 10px 6px;
     }
 }
+
+/* Chat rooms */
+.rooms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.room {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+.room.active {
+    background: var(--fg);
+    color: var(--bg);
+}
+
+/* Profile handle and badges */
+#profileName {
+    margin-bottom: 2px;
+    overflow-wrap: anywhere;
+}
+
+.handle {
+    margin: 0 0 8px;
+    color: var(--muted);
+}
+
+.badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.badges:empty {
+    display: none;
+}
+
+.pill {
+    border: 1px solid;
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.name-tag {
+    margin-left: 4px;
+}
