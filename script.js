@@ -102,6 +102,8 @@ const dmSendButton = document.getElementById("dmSendButton");
 
 // Profile elements
 const profileModal = document.getElementById("profileModal");
+profileModal.hidden = true; // Ensure modal is hidden on load
+
 const profileAvatar = document.getElementById("profileAvatar");
 const profileName = document.getElementById("profileName");
 const profileBio = document.getElementById("profileBio");
