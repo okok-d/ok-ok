@@ -184,6 +184,15 @@ const modSection = document.getElementById("modSection");
 const badgeManager = document.getElementById("badgeManager");
 const banButton = document.getElementById("banButton");
 
+// Admin elements
+const tabAdmin = document.getElementById("tabAdmin");
+const adminPanel = document.getElementById("adminPanel");
+const adminStats = document.getElementById("adminStats");
+const adminRooms = document.getElementById("adminRooms");
+const adminSearch = document.getElementById("adminSearch");
+const adminRefresh = document.getElementById("adminRefresh");
+const adminList = document.getElementById("adminList");
+
 // FIX: digits 0-9 are now allowed (the old pattern skipped 0)
 const usernamePattern = /^[a-z0-9_]{1,20}$/;
 
@@ -676,6 +685,7 @@ banButton.addEventListener("click", async () => {
 
 document.getElementById("closeProfile").addEventListener("click", () => {
     profileModal.hidden = true;
+    if (!adminPanel.hidden) loadAdmin(); // refresh badges shown in the admin list
 });
 
 profileModal.addEventListener("click", (event) => {
@@ -703,6 +713,8 @@ async function loadRoles() {
     isStaff = isOwner || keys.includes("mod");
     isBanned = !!(ban.data && ban.data.length);
     allBadges = badges.data || [];
+
+    tabAdmin.hidden = !isOwner;
 
     input.disabled = isBanned;
     sendButton.disabled = isBanned;
@@ -1123,11 +1135,16 @@ function updateBadge() {
     dmBadge.textContent = unreadFrom.size;
 }
 
-function switchPanel(showDMs) {
-    publicPanel.hidden = showDMs;
-    dmPanel.hidden = !showDMs;
-    tabPublic.classList.toggle("active", !showDMs);
-    tabDMs.classList.toggle("active", showDMs);
+// view: false = public chat, true = DMs, "admin" = admin panel
+function switchPanel(view) {
+    const v = view === "admin" ? "admin" : view ? "dms" : "public";
+
+    publicPanel.hidden = v !== "public";
+    dmPanel.hidden = v !== "dms";
+    adminPanel.hidden = v !== "admin";
+    tabPublic.classList.toggle("active", v === "public");
+    tabDMs.classList.toggle("active", v === "dms");
+    tabAdmin.classList.toggle("active", v === "admin");
 }
 
 tabPublic.addEventListener("click", () => switchPanel(false));
@@ -1368,6 +1385,7 @@ function listenForDMs() {
 }
 
 function resetDMs() {
+    tabAdmin.hidden = true;
     isStaff = false;
     isOwner = false;
     isBanned = false;
@@ -1390,6 +1408,221 @@ function resetDMs() {
         dmChannel = null;
     }
 }
+
+// ---------- Admin panel (owner only; the database enforces the rules) ----------
+
+let adminUsers = [];
+const adminBanned = new Set();
+
+function adminButton(label, onClick, options = {}) {
+    const button = document.createElement("button");
+    button.textContent = label;
+    if (options.danger) button.className = "danger";
+    if (options.disabled) button.disabled = true;
+    button.addEventListener("click", onClick);
+    return button;
+}
+
+async function loadAdmin() {
+    if (!isOwner || !currentSession) return;
+
+    adminStats.textContent = "Loading...";
+    adminRooms.replaceChildren();
+
+    roomTabs.querySelectorAll(".room").forEach((r) => {
+        const room = r.dataset.room;
+        const button = document.createElement("button");
+        button.className = "room";
+        button.textContent = "Clear #" + room;
+        button.addEventListener("click", () => adminClearRoom(room));
+        adminRooms.appendChild(button);
+    });
+
+    const [profiles, bans, msgs] = await Promise.all([
+        db.from("profiles")
+            .select("id, username, display_name, user_badges(badge_key, badges(label, icon, color))")
+            .order("username"),
+        db.from("bans").select("user_id"),
+        db.from("messages").select("id", { count: "exact", head: true })
+    ]);
+
+    if (profiles.error) {
+        adminStats.textContent = "Could not load users: " + profiles.error.message;
+        return;
+    }
+
+    adminUsers = profiles.data || [];
+    adminBanned.clear();
+    (bans.data || []).forEach((b) => adminBanned.add(b.user_id));
+
+    updateAdminStats(msgs.count);
+    renderAdminList();
+}
+
+function updateAdminStats(messageCount) {
+    if (messageCount !== undefined) adminStats.dataset.messages = messageCount ?? "?";
+
+    adminStats.textContent =
+        adminUsers.length + " users, " +
+        adminBanned.size + " banned, " +
+        (adminStats.dataset.messages || "?") + " messages";
+}
+
+function renderAdminList() {
+    if (!currentSession) return;
+
+    const me = currentSession.user.id;
+    const query = adminSearch.value.trim().toLowerCase();
+
+    adminList.replaceChildren();
+
+    adminUsers
+        .filter((u) =>
+            !query ||
+            u.username.toLowerCase().includes(query) ||
+            (u.display_name || "").toLowerCase().includes(query))
+        .forEach((u) => {
+            const mine = u.id === me;
+            const banned = adminBanned.has(u.id);
+
+            const row = document.createElement("div");
+            row.className = "admin-row";
+
+            const info = document.createElement("div");
+            info.className = "admin-info";
+
+            const name = document.createElement("strong");
+            name.textContent = displayNameOf(u);
+
+            const handle = document.createElement("span");
+            handle.className = "handle";
+            handle.textContent = "@" + u.username + (mine ? " (you)" : "");
+
+            const badges = document.createElement("div");
+            badges.className = "badges";
+            renderBadges(badges, u);
+
+            if (banned) {
+                const pill = document.createElement("span");
+                pill.className = "pill banned";
+                pill.append(makeIcon("skull-bones"), " Banned");
+                badges.appendChild(pill);
+            }
+
+            info.append(name, handle, badges);
+
+            const actions = document.createElement("div");
+            actions.className = "admin-actions";
+            actions.append(
+                adminButton("Badges", () => openProfile(u.id)),
+                adminButton(banned ? "Unban" : "Ban", () => adminToggleBan(u, banned), { disabled: mine }),
+                adminButton("Delete messages", () => adminWipeMessages(u)),
+                adminButton("Delete account", () => adminDeleteUser(u), { danger: true, disabled: mine })
+            );
+
+            row.append(info, actions);
+            adminList.appendChild(row);
+        });
+
+    if (!adminList.children.length) {
+        const empty = document.createElement("p");
+        empty.className = "dm-empty";
+        empty.textContent = "No users match.";
+        adminList.appendChild(empty);
+    }
+}
+
+async function adminToggleBan(user, banned) {
+    const { error } = banned
+        ? await db.from("bans").delete().eq("user_id", user.id)
+        : await db.from("bans").insert({
+            user_id: user.id,
+            banned_by: currentSession.user.id
+        });
+
+    if (error) {
+        status.textContent = "Ban change failed: " + error.message;
+        return;
+    }
+
+    if (banned) adminBanned.delete(user.id);
+    else adminBanned.add(user.id);
+
+    status.textContent = (banned ? "Unbanned " : "Banned ") + "@" + user.username + ".";
+    updateAdminStats();
+    renderAdminList();
+}
+
+async function adminWipeMessages(user) {
+    if (!confirm("Delete every public message from @" + user.username + "?")) return;
+
+    const { data, error } = await db
+        .from("messages")
+        .delete()
+        .eq("user_id", user.id)
+        .select("id");
+
+    if (error) {
+        status.textContent = "Delete failed: " + error.message;
+        return;
+    }
+
+    status.textContent = "Deleted " + (data ? data.length : 0) + " messages from @" + user.username + ".";
+    await loadMessages();
+    loadAdmin();
+}
+
+async function adminClearRoom(room) {
+    if (!confirm("Delete EVERY message in #" + room + "? This cannot be undone.")) return;
+
+    const { data, error } = await db
+        .from("messages")
+        .delete()
+        .eq("room", room)
+        .select("id");
+
+    if (error) {
+        status.textContent = "Clear failed: " + error.message;
+        return;
+    }
+
+    status.textContent = "Cleared #" + room + " (" + (data ? data.length : 0) + " messages).";
+    await loadMessages();
+    loadAdmin();
+}
+
+async function adminDeleteUser(user) {
+    const answer = prompt(
+        "This permanently deletes @" + user.username +
+        " and all of their messages, DMs, badges and uploads.\n\n" +
+        'Type "' + user.username + '" to confirm:'
+    );
+
+    if (answer !== user.username) {
+        if (answer !== null) status.textContent = "Username didn't match. Nothing was deleted.";
+        return;
+    }
+
+    const { error } = await db.rpc("admin_delete_user", { target: user.id });
+
+    if (error) {
+        status.textContent = "Account delete failed: " + error.message;
+        return;
+    }
+
+    profileCache.delete(user.id);
+    status.textContent = "Deleted @" + user.username + ".";
+    await loadMessages();
+    loadAdmin();
+}
+
+tabAdmin.addEventListener("click", () => {
+    switchPanel("admin");
+    loadAdmin();
+});
+
+adminSearch.addEventListener("input", renderAdminList);
+adminRefresh.addEventListener("click", loadAdmin);
 
 // ---------- Startup ----------
 
