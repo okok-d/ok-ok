@@ -87,9 +87,11 @@ document.getElementById("replyCancel").addEventListener("click", () => clearRepl
 // Tabs and DM elements
 const tabPublic = document.getElementById("tabPublic");
 const tabDMs = document.getElementById("tabDMs");
+const tabBlirs = document.getElementById("tabBlirs");
 const dmBadge = document.getElementById("dmBadge");
 const publicPanel = document.getElementById("publicPanel");
 const dmPanel = document.getElementById("dmPanel");
+const blirsPanel = document.getElementById("blirsPanel");
 const dmListView = document.getElementById("dmListView");
 const dmList = document.getElementById("dmList");
 const dmChatView = document.getElementById("dmChatView");
@@ -275,6 +277,7 @@ async function updateAccount(session) {
         leavePresence();
         clearReply();
         resetDMs();
+        blirsApi.sync(null);
         authArea.hidden = false;
         chatArea.hidden = true;
         return;
@@ -307,6 +310,7 @@ async function updateAccount(session) {
     listenForDMs();
     await loadMessages();
     joinPresence();
+    blirsApi.sync(session);
     status.textContent = "Connected to chat!";
 }
 
@@ -1269,6 +1273,11 @@ function listenForMessages() {
                     const b = roomTabs.querySelector('[data-room="' + payload.new.room + '"]');
                     if (b) b.classList.add("unread");
                 }
+
+                // Counts toward the "send 5 chat messages" blir quest
+                if (currentSession && payload.new.user_id === currentSession.user.id) {
+                    blirsApi.countMessage();
+                }
             }
         )
         .on(
@@ -1363,15 +1372,17 @@ function updateBadge() {
     dmBadge.textContent = unreadFrom.size;
 }
 
-// view: false = public chat, true = DMs, "admin" = admin panel
+// view: false = public chat, true = DMs, "admin" = admin panel, "blirs" = blirs game
 function switchPanel(view) {
-    const v = view === "admin" ? "admin" : view ? "dms" : "public";
+    const v = view === "admin" ? "admin" : view === "blirs" ? "blirs" : view ? "dms" : "public";
 
     publicPanel.hidden = v !== "public";
     dmPanel.hidden = v !== "dms";
+    blirsPanel.hidden = v !== "blirs";
     adminPanel.hidden = v !== "admin";
     tabPublic.classList.toggle("active", v === "public");
     tabDMs.classList.toggle("active", v === "dms");
+    tabBlirs.classList.toggle("active", v === "blirs");
     tabAdmin.classList.toggle("active", v === "admin");
 }
 
@@ -1640,283 +1651,3 @@ function resetDMs() {
         dmChannel = null;
     }
 }
-
-// ---------- Admin panel (owner only; the database enforces the rules) ----------
-
-let adminUsers = [];
-const adminBanned = new Set();
-
-function adminButton(label, onClick, options = {}) {
-    const button = document.createElement("button");
-    button.textContent = label;
-    if (options.danger) button.className = "danger";
-    if (options.disabled) button.disabled = true;
-    button.addEventListener("click", onClick);
-    return button;
-}
-
-async function loadAdmin() {
-    if (!isOwner || !currentSession) return;
-
-    adminStats.textContent = "Loading...";
-    adminRooms.replaceChildren();
-
-    roomTabs.querySelectorAll(".room").forEach((r) => {
-        const room = r.dataset.room;
-        const button = document.createElement("button");
-        button.className = "room";
-        button.textContent = "Clear #" + room;
-        button.addEventListener("click", () => adminClearRoom(room));
-        adminRooms.appendChild(button);
-    });
-
-    let [profiles, bans, msgs] = await Promise.all([
-        db.from("profiles")
-            .select("id, username, display_name, user_badges(badge_key, badges(label, icon, color))")
-            .order("username"),
-        db.from("bans").select("user_id"),
-        db.from("messages").select("id", { count: "exact", head: true })
-    ]);
-
-    if (profiles.error) {
-        const plain = await db
-            .from("profiles")
-            .select("id, username, display_name")
-            .order("username");
-
-        if (!plain.error) {
-            const [ub, all] = await Promise.all([
-                db.from("user_badges").select("user_id, badge_key"),
-                db.from("badges").select("key, label, icon, color")
-            ]);
-            const byKey = new Map((all.data || []).map((b) => [b.key, b]));
-
-            plain.data.forEach((u) => {
-                u.user_badges = (ub.data || [])
-                    .filter((r) => r.user_id === u.id)
-                    .map((r) => ({ badge_key: r.badge_key, badges: byKey.get(r.badge_key) || null }));
-            });
-        }
-
-        profiles = plain;
-    }
-
-    if (profiles.error) {
-        adminStats.textContent = "Could not load users: " + profiles.error.message;
-        return;
-    }
-
-    adminUsers = profiles.data || [];
-    adminBanned.clear();
-    (bans.data || []).forEach((b) => adminBanned.add(b.user_id));
-
-    updateAdminStats(msgs.count);
-    renderAdminList();
-}
-
-function updateAdminStats(messageCount) {
-    if (messageCount !== undefined) adminStats.dataset.messages = messageCount ?? "?";
-
-    adminStats.textContent =
-        adminUsers.length + " users, " +
-        adminBanned.size + " banned, " +
-        (adminStats.dataset.messages || "?") + " messages";
-}
-
-function renderAdminList() {
-    if (!currentSession) return;
-
-    const me = currentSession.user.id;
-    const query = adminSearch.value.trim().toLowerCase();
-
-    adminList.replaceChildren();
-
-    adminUsers
-        .filter((u) =>
-            !query ||
-            u.username.toLowerCase().includes(query) ||
-            (u.display_name || "").toLowerCase().includes(query))
-        .forEach((u) => {
-            const mine = u.id === me;
-            const banned = adminBanned.has(u.id);
-
-            const row = document.createElement("div");
-            row.className = "admin-row";
-
-            const info = document.createElement("div");
-            info.className = "admin-info";
-
-            const name = document.createElement("strong");
-            name.textContent = displayNameOf(u);
-
-            const handle = document.createElement("span");
-            handle.className = "handle";
-            handle.textContent = "@" + u.username + (mine ? " (you)" : "");
-
-            const badges = document.createElement("div");
-            badges.className = "badges";
-            renderBadges(badges, u);
-
-            if (banned) {
-                const pill = document.createElement("span");
-                pill.className = "pill banned";
-                pill.append(makeIcon("skull-bones"), " Banned");
-                badges.appendChild(pill);
-            }
-
-            info.append(name, handle, badges);
-
-            const actions = document.createElement("div");
-            actions.className = "admin-actions";
-            actions.append(
-                adminButton("Badges", () => openProfile(u.id)),
-                adminButton(banned ? "Unban" : "Ban", () => adminToggleBan(u, banned), { disabled: mine }),
-                adminButton("Delete messages", () => adminWipeMessages(u)),
-                adminButton("Delete account", () => adminDeleteUser(u), { danger: true, disabled: mine })
-            );
-
-            row.append(info, actions);
-            adminList.appendChild(row);
-        });
-
-    if (!adminList.children.length) {
-        const empty = document.createElement("p");
-        empty.className = "dm-empty";
-        empty.textContent = "No users match.";
-        adminList.appendChild(empty);
-    }
-}
-
-async function adminToggleBan(user, banned) {
-    const { error } = banned
-        ? await db.from("bans").delete().eq("user_id", user.id)
-        : await db.from("bans").insert({
-            user_id: user.id,
-            banned_by: currentSession.user.id
-        });
-
-    if (error) {
-        status.textContent = "Ban change failed: " + error.message;
-        return;
-    }
-
-    if (banned) adminBanned.delete(user.id);
-    else adminBanned.add(user.id);
-
-    status.textContent = (banned ? "Unbanned " : "Banned ") + "@" + user.username + ".";
-    updateAdminStats();
-    renderAdminList();
-}
-
-async function adminWipeMessages(user) {
-    if (!confirm("Delete every public message from @" + user.username + "?")) return;
-
-    const { data, error } = await db
-        .from("messages")
-        .delete()
-        .eq("user_id", user.id)
-        .select("id");
-
-    if (error) {
-        status.textContent = "Delete failed: " + error.message;
-        return;
-    }
-
-    status.textContent = "Deleted " + (data ? data.length : 0) + " messages from @" + user.username + ".";
-    await loadMessages();
-    loadAdmin();
-}
-
-async function adminClearRoom(room) {
-    if (!confirm("Delete EVERY message in #" + room + "? This cannot be undone.")) return;
-
-    const { data, error } = await db
-        .from("messages")
-        .delete()
-        .eq("room", room)
-        .select("id");
-
-    if (error) {
-        status.textContent = "Clear failed: " + error.message;
-        return;
-    }
-
-    status.textContent = "Cleared #" + room + " (" + (data ? data.length : 0) + " messages).";
-    await loadMessages();
-    loadAdmin();
-}
-
-async function adminDeleteUser(user) {
-    const answer = prompt(
-        "This permanently deletes @" + user.username +
-        " and all of their messages, DMs, badges and uploads.\n\n" +
-        'Type "' + user.username + '" to confirm:'
-    );
-
-    if (answer !== user.username) {
-        if (answer !== null) status.textContent = "Username didn't match. Nothing was deleted.";
-        return;
-    }
-
-    // Uploads must be removed through the Storage API, not SQL
-    const { data: files } = await db.storage.from("avatars").list(user.id);
-
-    if (files && files.length) {
-        const { error: removeError } = await db.storage
-            .from("avatars")
-            .remove(files.map((f) => user.id + "/" + f.name));
-
-        if (removeError) {
-            status.textContent = "Could not delete uploads: " + removeError.message;
-            return;
-        }
-    }
-
-    const { error } = await db.rpc("admin_delete_user", { target: user.id });
-
-    if (error) {
-        status.textContent = "Account delete failed: " + error.message;
-        return;
-    }
-
-    profileCache.delete(user.id);
-    status.textContent = "Deleted @" + user.username + ".";
-    await loadMessages();
-    loadAdmin();
-}
-
-tabAdmin.addEventListener("click", () => {
-    switchPanel("admin");
-    loadAdmin();
-});
-
-adminSearch.addEventListener("input", renderAdminList);
-adminRefresh.addEventListener("click", loadAdmin);
-
-// ---------- Startup ----------
-
-// Restore login when page opens
-async function startChat() {
-    listenForMessages();
-
-    const { data, error } = await db.auth.getSession();
-
-    if (error) {
-        status.textContent = "Session error: " + error.message;
-        return;
-    }
-
-    await updateAccount(data.session);
-}
-
-// Listen for login/logout changes.
-// Don't await Supabase calls inside this callback (can deadlock), so the
-// work is deferred with setTimeout. updateAccount also ignores repeat
-// SIGNED_IN events for a user who is already loaded.
-db.auth.onAuthStateChange((event, session) => {
-    if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
-        setTimeout(() => updateAccount(session), 0);
-    }
-});
-
-startChat();
