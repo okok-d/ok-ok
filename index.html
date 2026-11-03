@@ -17,33 +17,94 @@
 
     <main>
 
-        <div id="messages">
-            <p>Loading messages...</p>
-        </div>
+        <!-- Account area -->
+        <section id="authArea">
 
-        <div class="input-area">
+            <div id="signupArea">
+                <h2>Create account</h2>
 
-            <input
-                id="username"
-                type="text"
-                maxlength="20"
-                placeholder="Username"
-                autocomplete="off"
-            >
+                <input
+                    id="signupUsername"
+                    type="text"
+                    maxlength="20"
+                    placeholder="Username"
+                    autocomplete="username"
+                >
 
-            <input
-                id="message"
-                type="text"
-                maxlength="1000"
-                placeholder="Write a message..."
-                autocomplete="off"
-            >
+                <input
+                    id="signupEmail"
+                    type="email"
+                    placeholder="Email"
+                    autocomplete="email"
+                >
 
-            <button id="sendButton" onclick="sendMessage()">
-                Send
-            </button>
+                <input
+                    id="signupPassword"
+                    type="password"
+                    placeholder="Password (at least 8 characters)"
+                    autocomplete="new-password"
+                >
 
-        </div>
+                <button id="signupButton">Create account</button>
+
+                <p>
+                    Already have an account?
+                    <a href="#" id="showLogin">Log in</a>
+                </p>
+            </div>
+
+            <div id="loginArea" hidden>
+                <h2>Log in</h2>
+
+                <input
+                    id="loginEmail"
+                    type="email"
+                    placeholder="Email"
+                    autocomplete="email"
+                >
+
+                <input
+                    id="loginPassword"
+                    type="password"
+                    placeholder="Password"
+                    autocomplete="current-password"
+                >
+
+                <button id="loginButton">Log in</button>
+
+                <p>
+                    Need an account?
+                    <a href="#" id="showSignup">Create one</a>
+                </p>
+            </div>
+
+        </section>
+
+        <!-- Logged-in area -->
+        <section id="chatArea" hidden>
+
+            <div class="account-bar">
+                <span id="currentUser"></span>
+                <button id="logoutButton">Log out</button>
+            </div>
+
+            <div id="messages">
+                <p>Loading messages...</p>
+            </div>
+
+            <div class="input-area">
+                <input
+                    id="message"
+                    type="text"
+                    maxlength="1000"
+                    placeholder="Write a message..."
+                    autocomplete="off"
+                >
+
+                <button id="sendButton">Send</button>
+            </div>
+
+        </section>
 
         <p id="status">Connecting...</p>
 
