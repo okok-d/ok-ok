@@ -8,101 +8,32 @@ const db = window.supabase.createClient(
 
 // Icons: positions in icons.png (column, row)
 const ICONS = {
-    "user": [0, 0],
-    "users": [1, 0],
-    "crown": [2, 0],
-    "shield-star": [3, 0],
-    "trophy": [4, 0],
-    "award": [5, 0],
-    "gift": [6, 0],
-    "gear": [7, 0],
-    "star": [8, 0],
-    "heart": [9, 0],
-    "diamond": [10, 0],
-    "fire": [11, 0],
-    "bolt": [12, 0],
-    "skull": [13, 0],
-    "shield-check": [14, 0],
-    "star-circle": [0, 1],
-    "crown-circle": [1, 1],
-    "flask": [2, 1],
-    "cart": [3, 1],
-    "calendar": [4, 1],
-    "clock": [5, 1],
-    "bars": [6, 1],
-    "target": [7, 1],
-    "bug": [8, 1],
-    "code": [9, 1],
-    "palette": [10, 1],
-    "wrench": [11, 1],
-    "hammer": [12, 1],
-    "tools": [13, 1],
-    "binoculars": [14, 1],
-    "search": [15, 1],
-    "emblem": [0, 2],
-    "chevrons-down": [1, 2],
-    "chevrons-up": [2, 2],
-    "star-badge": [3, 2],
-    "hexagon": [4, 2],
-    "layers": [5, 2],
-    "crown-2": [6, 2],
-    "laurel": [7, 2],
-    "wings-crown": [8, 2],
-    "wings-star": [9, 2],
-    "shield-star-2": [10, 2],
-    "shield-lock": [11, 2],
-    "cube-hex": [12, 2],
-    "cube": [13, 2],
-    "coins": [14, 2],
-    "ticket": [15, 2],
-    "ticket-star": [0, 3],
-    "ticket-crown": [1, 3],
-    "skull-bones": [2, 3],
-    "biohazard": [3, 3],
-    "radiation": [4, 3],
-    "snowflake": [5, 3],
-    "sun": [6, 3],
-    "moon": [7, 3],
-    "cloud": [8, 3],
-    "drop": [9, 3],
-    "leaf": [10, 3],
-    "paw": [11, 3],
-    "cat": [12, 3],
-    "bunny": [13, 3],
-    "creeper": [14, 3],
+    "user": [0, 0], "users": [1, 0], "crown": [2, 0], "shield-star": [3, 0],
+    "trophy": [4, 0], "award": [5, 0], "gift": [6, 0], "gear": [7, 0],
+    "star": [8, 0], "heart": [9, 0], "diamond": [10, 0], "fire": [11, 0],
+    "bolt": [12, 0], "skull": [13, 0], "shield-check": [14, 0],
+    "star-circle": [0, 1], "crown-circle": [1, 1], "flask": [2, 1], "cart": [3, 1],
+    "calendar": [4, 1], "clock": [5, 1], "bars": [6, 1], "target": [7, 1],
+    "bug": [8, 1], "code": [9, 1], "palette": [10, 1], "wrench": [11, 1],
+    "hammer": [12, 1], "tools": [13, 1], "binoculars": [14, 1], "search": [15, 1],
+    "emblem": [0, 2], "chevrons-down": [1, 2], "chevrons-up": [2, 2],
+    "star-badge": [3, 2], "hexagon": [4, 2], "layers": [5, 2], "crown-2": [6, 2],
+    "laurel": [7, 2], "wings-crown": [8, 2], "wings-star": [9, 2],
+    "shield-star-2": [10, 2], "shield-lock": [11, 2], "cube-hex": [12, 2],
+    "cube": [13, 2], "coins": [14, 2], "ticket": [15, 2],
+    "ticket-star": [0, 3], "ticket-crown": [1, 3], "skull-bones": [2, 3],
+    "biohazard": [3, 3], "radiation": [4, 3], "snowflake": [5, 3], "sun": [6, 3],
+    "moon": [7, 3], "cloud": [8, 3], "drop": [9, 3], "leaf": [10, 3],
+    "paw": [11, 3], "cat": [12, 3], "bunny": [13, 3], "creeper": [14, 3],
     "pixel-heart": [15, 3],
-    "gamepad": [0, 4],
-    "monitor": [1, 4],
-    "phone": [2, 4],
-    "play": [3, 4],
-    "forward": [4, 4],
-    "rewind": [5, 4],
-    "pause": [6, 4],
-    "stop": [7, 4],
-    "record": [8, 4],
-    "volume": [9, 4],
-    "mute": [10, 4],
-    "bell": [11, 4],
-    "pin": [12, 4],
-    "location": [13, 4],
-    "flag": [14, 4],
-    "checkered-flag": [15, 4],
-    "tools-2": [0, 5],
-    "brush": [1, 5],
-    "pen-nib": [2, 5],
-    "camera": [3, 5],
-    "video": [4, 5],
-    "image": [5, 5],
-    "document": [6, 5],
-    "folder": [7, 5],
-    "chat": [8, 5],
-    "message": [9, 5],
-    "mail": [10, 5],
-    "question": [11, 5],
-    "warning": [12, 5],
-    "info": [13, 5],
-    "terminal": [14, 5],
-    "globe": [15, 5]
+    "gamepad": [0, 4], "monitor": [1, 4], "phone": [2, 4], "play": [3, 4],
+    "forward": [4, 4], "rewind": [5, 4], "pause": [6, 4], "stop": [7, 4],
+    "record": [8, 4], "volume": [9, 4], "mute": [10, 4], "bell": [11, 4],
+    "pin": [12, 4], "location": [13, 4], "flag": [14, 4], "checkered-flag": [15, 4],
+    "tools-2": [0, 5], "brush": [1, 5], "pen-nib": [2, 5], "camera": [3, 5],
+    "video": [4, 5], "image": [5, 5], "document": [6, 5], "folder": [7, 5],
+    "chat": [8, 5], "message": [9, 5], "mail": [10, 5], "question": [11, 5],
+    "warning": [12, 5], "info": [13, 5], "terminal": [14, 5], "globe": [15, 5]
 };
 
 function makeIcon(name, color) {
@@ -145,6 +76,13 @@ const input = document.getElementById("message");
 const sendButton = document.getElementById("sendButton");
 const currentUser = document.getElementById("currentUser");
 const status = document.getElementById("status");
+
+// New chat elements (online list, typing, reply bar)
+const onlineBar = document.getElementById("onlineBar");
+const typingEl = document.getElementById("typing");
+const replyBar = document.getElementById("replyBar");
+const replyText = document.getElementById("replyText");
+document.getElementById("replyCancel").addEventListener("click", () => clearReply());
 
 // Tabs and DM elements
 const tabPublic = document.getElementById("tabPublic");
@@ -193,13 +131,18 @@ const adminSearch = document.getElementById("adminSearch");
 const adminRefresh = document.getElementById("adminRefresh");
 const adminList = document.getElementById("adminList");
 
-// FIX: digits 0-9 are now allowed (the old pattern skipped 0)
 const usernamePattern = /^[a-z0-9_]{1,20}$/;
 
 let currentSession = null;
-let loadedUserId = null; // FIX: the user whose chat is currently loaded
+let loadedUserId = null; // the user whose chat is currently loaded
 let chatChannel = null;
 let activeRoom = "goldfish";
+let myUsername = "";
+let replyingTo = null;
+let presenceChannel = null;
+let typingTimer = null;
+let audioCtx = null;
+const messageCache = new Map(); // message id -> message row
 
 // Roles (these only control what buttons show; the database enforces the rules)
 let isStaff = false;
@@ -210,7 +153,7 @@ let allBadges = [];
 const REACTION_EMOJIS = ["👍", "😂", "🔥", "😮", "😢", "💯"];
 const reactionsByMsg = new Map(); // message id -> [{ user_id, emoji }]
 const reactionBars = new Map();   // message id -> reactions element
-const shownMessages = new Set();  // FIX: public message ids already on screen
+const shownMessages = new Set();  // public message ids already on screen
 
 // ---------- Dark mode ----------
 
@@ -240,7 +183,6 @@ updateThemeLabel();
 
 // ---------- Sign up / log in ----------
 
-// Switch between signup and login
 document.getElementById("showLogin").addEventListener("click", (event) => {
     event.preventDefault();
     signupArea.hidden = true;
@@ -253,16 +195,13 @@ document.getElementById("showSignup").addEventListener("click", (event) => {
     signupArea.hidden = false;
 });
 
-// Create account
 signupButton.addEventListener("click", async () => {
-    // Lowercase first so "Sdf" works as "sdf"
     const username = signupUsername.value.trim().toLowerCase();
     const email = signupEmail.value.trim();
     const password = signupPassword.value;
 
     if (!usernamePattern.test(username)) {
-        status.textContent =
-            "Username must be 1-20 characters: a-z, 0-9, or _";
+        status.textContent = "Username must be 1-20 characters: a-z, 0-9, or _";
         return;
     }
 
@@ -277,11 +216,7 @@ signupButton.addEventListener("click", async () => {
     const { data, error } = await db.auth.signUp({
         email: email,
         password: password,
-        options: {
-            data: {
-                username: username
-            }
-        }
+        options: { data: { username: username } }
     });
 
     signupButton.disabled = false;
@@ -291,16 +226,12 @@ signupButton.addEventListener("click", async () => {
         return;
     }
 
-    // FIX: no explicit updateAccount here; onAuthStateChange handles SIGNED_IN
-    if (data.session) {
-        status.textContent = "Account created!";
-    } else {
-        status.textContent =
-            "Check your email to confirm your account, then log in.";
-    }
+    // onAuthStateChange handles SIGNED_IN
+    status.textContent = data.session
+        ? "Account created!"
+        : "Check your email to confirm your account, then log in.";
 });
 
-// Log in
 loginButton.addEventListener("click", async () => {
     const email = loginEmail.value.trim();
     const password = loginPassword.value;
@@ -319,11 +250,8 @@ loginButton.addEventListener("click", async () => {
         status.textContent = "Login failed: " + error.message;
         return;
     }
-
-    // FIX: no explicit updateAccount here; onAuthStateChange handles SIGNED_IN
 });
 
-// Log out
 logoutButton.addEventListener("click", async () => {
     const { error } = await db.auth.signOut();
 
@@ -342,14 +270,17 @@ async function updateAccount(session) {
 
     if (!session) {
         loadedUserId = null;
+        myUsername = "";
         profileModal.hidden = true;
+        leavePresence();
+        clearReply();
         resetDMs();
         authArea.hidden = false;
         chatArea.hidden = true;
         return;
     }
 
-    // FIX: skip if this user's chat is already loaded (tab refocus re-fires SIGNED_IN)
+    // Skip if this user's chat is already loaded (tab refocus re-fires SIGNED_IN)
     if (loadedUserId === session.user.id) return;
     loadedUserId = session.user.id;
 
@@ -370,10 +301,12 @@ async function updateAccount(session) {
     }
 
     currentUser.textContent = "Logged in as: " + profile.username;
+    myUsername = profile.username.toLowerCase();
 
     await loadRoles();
     listenForDMs();
     await loadMessages();
+    joinPresence();
     status.textContent = "Connected to chat!";
 }
 
@@ -840,6 +773,168 @@ async function toggleBadge(userId, key, has) {
     await loadMessages();
 }
 
+// ---------- Small helpers: sound, mentions, replies, edits ----------
+
+function beep() {
+    try {
+        audioCtx = audioCtx || new AudioContext();
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.connect(g);
+        g.connect(audioCtx.destination);
+        o.frequency.value = 880;
+        g.gain.value = 0.05;
+        o.start();
+        o.stop(audioCtx.currentTime + 0.15);
+    } catch (e) {
+        // Sound is optional
+    }
+}
+
+// Writes text into el, highlighting @names
+function renderContent(el, text) {
+    el.replaceChildren();
+
+    text.split(/(@[a-zA-Z0-9_]{1,20})/g).forEach((part) => {
+        if (/^@[a-zA-Z0-9_]{1,20}$/.test(part)) {
+            const s = document.createElement("span");
+            s.className = "mention" + (part.slice(1).toLowerCase() === myUsername ? " me" : "");
+            s.textContent = part;
+            el.appendChild(s);
+        } else {
+            el.append(part);
+        }
+    });
+}
+
+function mentionsMe(text) {
+    return !!myUsername &&
+        new RegExp("@" + myUsername + "(?![a-zA-Z0-9_])", "i").test(text);
+}
+
+function startReply(msg) {
+    replyingTo = msg.id;
+    replyText.textContent =
+        "Replying to " + (msg.username || "user") + ": " + msg.content.slice(0, 60);
+    replyBar.hidden = false;
+    input.focus();
+}
+
+function clearReply() {
+    replyingTo = null;
+    replyBar.hidden = true;
+}
+
+async function editMessage(id) {
+    const old = messageCache.get(id);
+    if (!old) return;
+
+    const next = prompt("Edit message:", old.content);
+    if (next === null) return;
+
+    const content = next.trim();
+    if (!content || content.length > 1000 || content === old.content) return;
+
+    const { data, error } = await db
+        .from("messages")
+        .update({ content: content, edited_at: new Date().toISOString() })
+        .eq("id", id)
+        .select();
+
+    if (error) {
+        status.textContent = "Edit failed: " + error.message;
+        return;
+    }
+
+    if (!data || data.length === 0) {
+        status.textContent = "You can't edit that message.";
+        return;
+    }
+
+    applyEdit(data[0]);
+}
+
+function applyEdit(m) {
+    const cached = messageCache.get(m.id);
+    if (!cached) return;
+
+    cached.content = m.content;
+    cached.edited_at = m.edited_at;
+
+    const el = messages.querySelector('.message[data-id="' + CSS.escape(String(m.id)) + '"]');
+    if (el && el._setText) el._setText(m.content, !!m.edited_at);
+}
+
+// ---------- Presence: online list and typing ----------
+
+function leavePresence() {
+    if (presenceChannel) {
+        db.removeChannel(presenceChannel);
+        presenceChannel = null;
+    }
+
+    onlineBar.replaceChildren();
+    typingEl.textContent = "";
+}
+
+function joinPresence() {
+    leavePresence();
+    if (!currentSession) return;
+
+    presenceChannel = db.channel("presence-" + activeRoom, {
+        config: { presence: { key: currentSession.user.id } }
+    });
+
+    presenceChannel
+        .on("presence", { event: "sync" }, renderPresence)
+        .subscribe(async (state) => {
+            if (state === "SUBSCRIBED" && presenceChannel) {
+                await presenceChannel.track({ username: myUsername, typing: false });
+            }
+        });
+}
+
+function renderPresence() {
+    if (!presenceChannel || !currentSession) return;
+
+    const me = currentSession.user.id;
+    const typers = [];
+
+    onlineBar.replaceChildren();
+
+    Object.entries(presenceChannel.presenceState()).forEach(([id, metas]) => {
+        const meta = metas[0] || {};
+
+        const chip = document.createElement("button");
+        chip.className = "online-chip";
+
+        const av = document.createElement("div");
+        av.className = "avatar small online";
+        av.textContent = (meta.username || "?")[0].toUpperCase();
+        getProfile(id).then((p) => { if (p) renderAvatar(av, p); });
+
+        chip.append(av, meta.username || "user");
+        chip.addEventListener("click", () => openProfile(id));
+        onlineBar.appendChild(chip);
+
+        if (meta.typing && id !== me) typers.push(meta.username || "someone");
+    });
+
+    typingEl.textContent = typers.length
+        ? typers.slice(0, 3).join(", ") + (typers.length > 1 ? " are" : " is") + " typing..."
+        : "";
+}
+
+input.addEventListener("input", () => {
+    if (!presenceChannel) return;
+
+    presenceChannel.track({ username: myUsername, typing: true });
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+        if (presenceChannel) presenceChannel.track({ username: myUsername, typing: false });
+    }, 2000);
+});
+
 // ---------- Deleting messages and reactions ----------
 
 async function deleteMessage(id) {
@@ -869,6 +964,7 @@ function removeMessage(id) {
     shownMessages.delete(id);
     reactionBars.delete(id);
     reactionsByMsg.delete(id);
+    messageCache.delete(id);
 }
 
 function renderReactions(msgId) {
@@ -952,11 +1048,12 @@ function applyReaction(r, added) {
 
 // ---------- Public messages ----------
 
-// Display a message
-function displayMessage(msg) {
-    // FIX: don't show the same message twice (realtime vs. loadMessages race)
+// live = true when the message just arrived over realtime (can ping you)
+function displayMessage(msg, live = false) {
+    // Don't show the same message twice (realtime vs. loadMessages race)
     if (shownMessages.has(msg.id)) return;
     shownMessages.add(msg.id);
+    messageCache.set(msg.id, msg);
 
     const item = document.createElement("div");
     item.className = "message";
@@ -979,13 +1076,58 @@ function displayMessage(msg) {
     tag.className = "name-tag";
 
     const text = document.createElement("span");
-    text.textContent = ": " + msg.content;
+
+    function setText(content, edited) {
+        text.replaceChildren(": ");
+
+        const c = document.createElement("span");
+        renderContent(c, content);
+        text.appendChild(c);
+
+        if (edited) {
+            const editedTag = document.createElement("span");
+            editedTag.className = "edited";
+            editedTag.textContent = "(edited)";
+            text.appendChild(editedTag);
+        }
+    }
+
+    setText(msg.content, !!msg.edited_at);
+    item._setText = setText;
+
+    if (live && currentSession && msg.user_id !== currentSession.user.id && mentionsMe(msg.content)) {
+        item.classList.add("pinged");
+        status.textContent = (msg.username || "Someone") + " mentioned you.";
+        beep();
+        notify((msg.username || "Someone") + " mentioned you", msg.content);
+    }
 
     const time = document.createElement("small");
     time.textContent = new Date(msg.created_at).toLocaleString();
 
     const line = document.createElement("div");
     line.append(name, tag, text);
+
+    if (currentSession) {
+        // Reply button
+        const rep = document.createElement("button");
+        rep.className = "icon-btn";
+        rep.textContent = "↩";
+        rep.title = "Reply";
+        rep.addEventListener("click", () => startReply(messageCache.get(msg.id) || msg));
+        line.appendChild(rep);
+
+        // Edit button (your own messages only)
+        if (msg.user_id === currentSession.user.id) {
+            const ed = document.createElement("button");
+            ed.className = "icon-btn";
+            ed.textContent = "✏";
+            ed.title = "Edit message";
+            ed.addEventListener("click", () => editMessage(msg.id));
+            line.appendChild(ed);
+        }
+    }
+
     // Delete button (your own messages, or any message if you're staff)
     if (currentSession && (msg.user_id === currentSession.user.id || isStaff)) {
         const del = document.createElement("button");
@@ -1002,6 +1144,17 @@ function displayMessage(msg) {
     reactionBars.set(msg.id, reactBar);
     reactionsByMsg.set(msg.id, msg.message_reactions || []);
     renderReactions(msg.id);
+
+    // Quote of the message being replied to
+    if (msg.reply_to) {
+        const orig = messageCache.get(msg.reply_to);
+        const quote = document.createElement("div");
+        quote.className = "quote";
+        quote.textContent = orig
+            ? "↪ " + (orig.username || "user") + ": " + orig.content.slice(0, 80)
+            : "↪ original message";
+        body.appendChild(quote);
+    }
 
     body.append(line, time, reactBar);
     item.append(avatar, body);
@@ -1051,8 +1204,9 @@ async function loadMessages() {
     reactionsByMsg.clear();
     reactionBars.clear();
     shownMessages.clear();
+    messageCache.clear();
     messages.replaceChildren();
-    data.forEach(displayMessage);
+    data.forEach((m) => displayMessage(m));
 }
 
 // Send message
@@ -1073,7 +1227,8 @@ async function sendMessage() {
         .insert({
             user_id: currentSession.user.id,
             room: activeRoom,
-            content: content
+            content: content,
+            reply_to: replyingTo
         });
 
     if (error) {
@@ -1081,6 +1236,7 @@ async function sendMessage() {
         console.error(error);
     } else {
         input.value = "";
+        clearReply();
         status.textContent = "Message sent!";
     }
 
@@ -1104,14 +1260,21 @@ function listenForMessages() {
         .channel("chat-room")
         .on(
             "postgres_changes",
-            {
-                event: "INSERT",
-                schema: "public",
-                table: "messages"
-            },
+            { event: "INSERT", schema: "public", table: "messages" },
             (payload) => {
-                if (payload.new.room === activeRoom) displayMessage(payload.new);
+                if (payload.new.room === activeRoom) {
+                    displayMessage(payload.new, true);
+                } else {
+                    // Unread dot on the room tab
+                    const b = roomTabs.querySelector('[data-room="' + payload.new.room + '"]');
+                    if (b) b.classList.add("unread");
+                }
             }
+        )
+        .on(
+            "postgres_changes",
+            { event: "UPDATE", schema: "public", table: "messages" },
+            (payload) => applyEdit(payload.new)
         )
         .on(
             "postgres_changes",
@@ -1153,6 +1316,8 @@ roomTabs.addEventListener("click", (event) => {
     if (!button || button.dataset.room === activeRoom) return;
 
     activeRoom = button.dataset.room;
+    button.classList.remove("unread");
+    clearReply();
 
     roomTabs.querySelectorAll(".room").forEach((b) => {
         b.classList.toggle("active", b === button);
@@ -1162,7 +1327,29 @@ roomTabs.addEventListener("click", (event) => {
     messages.replaceChildren();
     shownMessages.clear();
     loadMessages();
+    joinPresence();
 });
+
+// ---------- Notifications ----------
+
+// Browser notifications only show when the tab isn't in focus
+function notify(title, body) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    if (!document.hidden) return;
+
+    try {
+        new Notification(title, { body: String(body).slice(0, 100) });
+    } catch (e) {
+        // Some browsers block this; sound still plays
+    }
+}
+
+// Ask once, on the first click (browsers require a user gesture)
+document.addEventListener("click", () => {
+    if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+}, { once: true });
 
 // ---------- Direct messages ----------
 
@@ -1395,11 +1582,7 @@ function listenForDMs() {
         .channel("direct-messages")
         .on(
             "postgres_changes",
-            {
-                event: "INSERT",
-                schema: "public",
-                table: "direct_messages"
-            },
+            { event: "INSERT", schema: "public", table: "direct_messages" },
             (payload) => {
                 if (!currentSession) return;
 
@@ -1413,9 +1596,17 @@ function listenForDMs() {
 
                 if (viewing) {
                     displayDM(m);
-                } else if (m.recipient_id === me) {
-                    unreadFrom.add(other);
-                    updateBadge();
+                }
+
+                // Sound and notification for messages sent to you
+                if (m.recipient_id === me && (!viewing || document.hidden)) {
+                    if (!viewing) {
+                        unreadFrom.add(other);
+                        updateBadge();
+                    }
+
+                    beep();
+                    getProfile(other).then((p) => notify(displayNameOf(p), m.content));
                 }
 
                 // Refresh the list if it's showing
@@ -1667,6 +1858,20 @@ async function adminDeleteUser(user) {
         return;
     }
 
+    // Uploads must be removed through the Storage API, not SQL
+    const { data: files } = await db.storage.from("avatars").list(user.id);
+
+    if (files && files.length) {
+        const { error: removeError } = await db.storage
+            .from("avatars")
+            .remove(files.map((f) => user.id + "/" + f.name));
+
+        if (removeError) {
+            status.textContent = "Could not delete uploads: " + removeError.message;
+            return;
+        }
+    }
+
     const { error } = await db.rpc("admin_delete_user", { target: user.id });
 
     if (error) {
@@ -1705,8 +1910,8 @@ async function startChat() {
 }
 
 // Listen for login/logout changes.
-// FIX: don't await Supabase calls inside this callback (can deadlock), so
-// the work is deferred with setTimeout. updateAccount also ignores repeat
+// Don't await Supabase calls inside this callback (can deadlock), so the
+// work is deferred with setTimeout. updateAccount also ignores repeat
 // SIGNED_IN events for a user who is already loaded.
 db.auth.onAuthStateChange((event, session) => {
     if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
