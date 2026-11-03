@@ -408,3 +408,114 @@ button:disabled {
 .name-tag {
     margin-left: 4px;
 }
+
+/* Banner */
+.banner {
+    height: 110px;
+    margin: -20px -20px 0;
+    background: var(--avatar);
+    overflow: hidden;
+}
+
+.banner img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.avatar.big {
+    position: relative;
+    margin: -48px auto 10px;
+    border: 4px solid var(--bg);
+}
+
+.close {
+    z-index: 2;
+    background: var(--bg);
+}
+
+.modal-card {
+    max-height: 92vh;
+    overflow-y: auto;
+}
+
+/* Profile form extras */
+.field-label {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+select {
+    padding: 10px;
+    border: 1px solid var(--field);
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 14px;
+}
+
+/* Delete button and reactions */
+.icon-btn {
+    border: none;
+    background: none;
+    padding: 0 0 0 8px;
+    font-size: 13px;
+    opacity: 0.6;
+}
+
+.icon-btn:hover {
+    background: none;
+    opacity: 1;
+}
+
+.reactions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.chip {
+    padding: 2px 8px;
+    font-size: 12px;
+    border-radius: 12px;
+}
+
+.chip.mine {
+    background: var(--fg);
+    color: var(--bg);
+}
+
+.chip.mine:hover {
+    background: var(--fg);
+}
+
+.chip.add {
+    opacity: 0.7;
+}
+
+/* Moderation */
+.mod-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+}
+
+.badge-manager {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+}
+
+.badge-manager[hidden] {
+    display: none;
+}
+
+.pill.banned {
+    color: #e53935;
+    border-color: #e53935;
+}
