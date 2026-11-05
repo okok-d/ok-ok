@@ -1938,9 +1938,14 @@ startChat();
     const NAME_COOLDOWN_MS = 2 * 60 * 60 * 1000;
     const S = 1.8 / 32; // size of one skin pixel in blocks (player is 1.8 tall)
 
-    const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, SAND = 4, LOG = 5, LEAVES = 6, PLANKS = 7, WATER = 8, COBBLE = 9;
-    const HOTBAR = [GRASS, DIRT, STONE, SAND, LOG, PLANKS, LEAVES, COBBLE];
-    const NT = 11, TILE = 16;
+    const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, SAND = 4, LOG = 5, LEAVES = 6, PLANKS = 7, WATER = 8, COBBLE = 9,
+        BEDROCK = 10, COAL = 11, IRON = 12, GLASS = 13, MAXB = 13;
+    const PALETTE = [GRASS, DIRT, STONE, COBBLE, SAND, LOG, PLANKS, LEAVES, GLASS, COAL, IRON];
+    const HOTBAR = [GRASS, DIRT, STONE, COBBLE, LOG, PLANKS, GLASS, SAND, LEAVES];
+    const NT = 15, TILE = 16;
+    const okBlock = (t) => t >= 0 && t <= MAXB && t !== WATER && t !== BEDROCK;
+    const HARD = { 1: 0.6, 2: 0.5, 3: 1.5, 4: 0.5, 5: 1.0, 6: 0.2, 7: 0.8, 9: 1.5, 11: 2, 12: 2.5, 13: 0.3 }; // seconds to mine
+    const BCOL = { 1: 0x58a63a, 2: 0x866043, 3: 0x7d7d7d, 4: 0xdbcfa3, 5: 0x685232, 6: 0x3a8c2c, 7: 0xa28250, 9: 0x737373, 11: 0x2a2a2a, 12: 0xc89670, 13: 0xc8e6f0 };
 
     // ---------- Panel elements (the markup lives in index.html) ----------
     const tabGame = document.getElementById("tabGame");
@@ -1983,6 +1988,8 @@ startChat();
     let inited = false, running = false, looping = false, entering = 0;
     let renderer, scene, camera, atlasTex, terrainMat, waterMat, highlight;
     let sunMesh, moonMesh, stars;
+    let crack, clouds, cloudMat, mineKey = null, mineT = 0;
+    const particles = [];
     const litMats = [];
     const blocks = new Uint8Array(W * D * H);
     const heights = new Int16Array(W * D);
@@ -2049,9 +2056,19 @@ startChat();
                 const beach = h <= SEA + 1;
                 for (let y = 0; y <= h; y++) {
                     let b;
-                    if (y === h) b = beach ? SAND : GRASS;
+                    if (y === 0) b = BEDROCK;
+                    else if (y === h) b = beach ? SAND : GRASS;
                     else if (y > h - 4) b = beach ? SAND : DIRT;
-                    else b = STONE;
+                    else {
+                        b = STONE;
+                        const rr = hash2(x + y * 977, z, 41);
+                        if (rr < 0.012) b = COAL;
+                        else if (y < 22 && rr > 0.995) b = IRON;
+                    }
+                    // two noise surfaces intersecting make worm-like tunnels
+                    if (y > 3 && y < h &&
+                        Math.abs(valueNoise(x / 14 + y / 9, z / 14 - y / 11, 700) - 0.5) < 0.07 &&
+                        Math.abs(valueNoise(z / 14 + y / 10, x / 14 - y / 8, 800) - 0.5) < 0.07) b = AIR;
                     blocks[idx(x, y, z)] = b;
                 }
                 for (let y = h + 1; y <= SEA; y++) blocks[idx(x, y, z)] = WATER;
@@ -2133,6 +2150,14 @@ startChat();
             return [j(115, a), j(115, a), j(115, a)];
         });
 
+        // New tiles: bedrock, coal ore, iron ore, glass
+        const stonepx = (x, y, i) => { const a = (nz(x, y, i) - 0.5) * 40; return [j(125, a), j(125, a), j(125, a)]; };
+        tile(11, (x, y) => { const a = (nz(x, y, 11) - 0.5) * 60; return [j(55, a), j(55, a), j(55, a)]; });
+        tile(12, (x, y) => hash2(Math.floor(x / 3), Math.floor(y / 3), 55) > 0.78 ? [30, 30, 30] : stonepx(x, y, 12));
+        tile(13, (x, y) => hash2(Math.floor(x / 3), Math.floor(y / 3), 56) > 0.8 ? [210, 160, 120] : stonepx(x, y, 13));
+        tile(14, (x, y) => (x === 0 || y === 0 || x === 15 || y === 15) ? [200, 230, 240]
+            : (x === y && x > 2 && x < 8) ? [255, 255, 255] : [0, 0, 0, 0]);
+
         const tex = new THREE_.CanvasTexture(c);
         tex.magFilter = THREE_.NearestFilter;
         tex.minFilter = THREE_.NearestFilter;
@@ -2153,6 +2178,10 @@ startChat();
             case PLANKS: return 8;
             case WATER: return 9;
             case COBBLE: return 10;
+            case BEDROCK: return 11;
+            case COAL: return 12;
+            case IRON: return 13;
+            case GLASS: return 14;
         }
         return 3;
     }
@@ -2168,19 +2197,39 @@ startChat();
     ];
     const UVU = [0, 1, 1, 0], UVV = [0, 0, 1, 1];
 
-    function addFace(T, x, y, z, F, tile, lowTop) {
+    // Ambient occlusion: corners next to solid blocks get darker
+    const AOB = [0.5, 0.68, 0.84, 1];
+    const aoSolid = (x, y, z) => { const b = getBlock(x, y, z); return b !== AIR && b !== WATER && b !== GLASS; };
+
+    function addFace(T, x, y, z, F, tile, lowTop, useAO) {
         const e = 0.02 / (TILE * NT);
         const u0 = tile / NT + e, u1 = (tile + 1) / NT - e;
-        const base = T.n;
+        const base = T.n, ao = [3, 3, 3, 3];
+        const t = F.d[0] ? [1, 2] : F.d[1] ? [0, 2] : [0, 1];
+        const px = x + F.d[0], py = y + F.d[1], pz = z + F.d[2];
         for (let k = 0; k < 4; k++) {
             const c = F.c[k];
             let cy = c[1];
             if (lowTop && cy === 1) cy = 0.88;
             T.p.push(x + c[0], y + cy, z + c[2]);
             T.u.push(UVU[k] ? u1 : u0, UVV[k] ? 1 - e : e);
-            T.c.push(F.shade, F.shade, F.shade);
+            let br = 1;
+            if (useAO) {
+                const a = [0, 0, 0], b = [0, 0, 0];
+                a[t[0]] = c[t[0]] * 2 - 1;
+                b[t[1]] = c[t[1]] * 2 - 1;
+                const s1 = aoSolid(px + a[0], py + a[1], pz + a[2]);
+                const s2 = aoSolid(px + b[0], py + b[1], pz + b[2]);
+                const cr = aoSolid(px + a[0] + b[0], py + a[1] + b[1], pz + a[2] + b[2]);
+                ao[k] = s1 && s2 ? 0 : 3 - (s1 + s2 + cr);
+                br = AOB[ao[k]];
+            }
+            const sh = F.shade * br;
+            T.c.push(sh, sh, sh);
         }
-        T.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
+        // flip the quad's diagonal so the shading doesn't look lopsided
+        if (ao[0] + ao[2] > ao[1] + ao[3]) T.i.push(base + 1, base + 2, base + 3, base + 1, base + 3, base);
+        else T.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
         T.n += 4;
     }
 
@@ -2218,8 +2267,9 @@ startChat();
                         const nb = getBlock(x + F.d[0], y + F.d[1], z + F.d[2]);
                         if (isW) { if (nb !== AIR) continue; }
                         else if (b === LEAVES) { if (nb !== AIR && nb !== WATER) continue; }
-                        else if (nb !== AIR && nb !== WATER && nb !== LEAVES) continue;
-                        addFace(isW ? B : A, x, y, z, F, tileFor(b, F.k), lowTop);
+                        else if (b === GLASS) { if (nb !== AIR && nb !== WATER && nb !== LEAVES) continue; }
+                        else if (nb !== AIR && nb !== WATER && nb !== LEAVES && nb !== GLASS) continue;
+                        addFace(isW ? B : A, x, y, z, F, tileFor(b, F.k), lowTop, !isW);
                     }
                 }
             }
@@ -2503,7 +2553,7 @@ startChat();
         if (!Array.isArray(list)) return;
         for (let i = 0; i + 3 < list.length; i += 4) {
             const x = list[i] | 0, y = list[i + 1] | 0, z = list[i + 2] | 0, t = list[i + 3] | 0;
-            if (t >= 0 && t <= COBBLE && t !== WATER) setBlock(x, y, z, t, false);
+            if (okBlock(t)) setBlock(x, y, z, t, false);
         }
     }
 
@@ -2514,7 +2564,7 @@ startChat();
             .on("broadcast", { event: "pos" }, (m) => onPos(m.payload))
             .on("broadcast", { event: "block" }, (m) => {
                 const p = m.payload || {};
-                if (p.t >= 0 && p.t <= COBBLE && p.t !== WATER) setBlock(p.x | 0, p.y | 0, p.z | 0, p.t | 0, false);
+                if (okBlock(p.t | 0)) setBlock(p.x | 0, p.y | 0, p.z | 0, p.t | 0, false);
             })
             .on("broadcast", { event: "hello" }, () => setTimeout(sendEdits, Math.random() * 500))
             .on("broadcast", { event: "edits" }, (m) => applyEdits(m.payload && m.payload.list))
@@ -2722,9 +2772,75 @@ startChat();
 
     const banned = () => typeof isBanned !== "undefined" && isBanned;
 
+    // Little square-wave blip for breaking / placing
+    function sfx(f) {
+        try {
+            audioCtx = audioCtx || new AudioContext();
+            const n = audioCtx.currentTime, o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = "square";
+            o.frequency.setValueAtTime(f, n);
+            o.frequency.exponentialRampToValueAtTime(f / 2, n + 0.1);
+            g.gain.setValueAtTime(0.04, n);
+            g.gain.exponentialRampToValueAtTime(0.001, n + 0.12);
+            o.connect(g);
+            g.connect(audioCtx.destination);
+            o.start();
+            o.stop(n + 0.12);
+        } catch (e) { /* sound is optional */ }
+    }
+
+    let partGeo = null;
+
+    function burst(x, y, z, b) {
+        partGeo = partGeo || new THREE_.BoxGeometry(0.12, 0.12, 0.12);
+        for (let i = 0; i < 10; i++) {
+            const m = new THREE_.Mesh(partGeo, new THREE_.MeshBasicMaterial({ color: BCOL[b] || 0x888888 }));
+            m.position.set(x + Math.random(), y + Math.random(), z + Math.random());
+            scene.add(m);
+            particles.push({ m: m, vx: (Math.random() - 0.5) * 3, vy: 1 + Math.random() * 3, vz: (Math.random() - 0.5) * 3, life: 0.7 });
+        }
+        sfx(140);
+    }
+
+    function updateParticles(dt) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.life -= dt;
+            p.vy -= 18 * dt;
+            p.m.position.x += p.vx * dt;
+            p.m.position.y += p.vy * dt;
+            p.m.position.z += p.vz * dt;
+            if (p.life <= 0) { scene.remove(p.m); p.m.material.dispose(); particles.splice(i, 1); }
+        }
+    }
+
     function actBreak() {
         if (banned() || !target || target.y === 0) return;
         setBlock(target.x, target.y, target.z, AIR, true);
+    }
+
+    // Hold left click to mine; harder blocks take longer
+    function updateMining(dt) {
+        if (isLocked() && mouse[0] && target && !banned() && target.y > 0) {
+            const key = idx(target.x, target.y, target.z);
+            if (key !== mineKey) { mineKey = key; mineT = 0; }
+            mineT += dt;
+            const b = getBlock(target.x, target.y, target.z);
+            const need = HARD[b] || 0.5;
+            crack.visible = true;
+            crack.position.set(target.x + 0.5, target.y + 0.5, target.z + 0.5);
+            crack.material.opacity = Math.min(0.7, mineT / need * 0.7);
+            if (mineT >= need) {
+                burst(target.x, target.y, target.z, b);
+                actBreak();
+                mineKey = null;
+                mineT = 0;
+            }
+        } else {
+            mineKey = null;
+            mineT = 0;
+            if (crack) crack.visible = false;
+        }
     }
 
     function actPlace() {
@@ -2736,6 +2852,7 @@ startChat();
         const p = player;
         if (p.x - 0.3 < px + 1 && p.x + 0.3 > px && p.y < py + 1 && p.y + 1.8 > py && p.z - 0.3 < pz + 1 && p.z + 0.3 > pz) return;
         setBlock(px, py, pz, HOTBAR[sel], true);
+        sfx(200);
     }
 
     const isLocked = () => document.pointerLockElement === canvas;
@@ -2745,6 +2862,21 @@ startChat();
         Array.from(hotbarEl.children).forEach((el, n) => el.classList.toggle("sel", n === sel));
     }
 
+    function drawSlot(n) {
+        const slot = hotbarEl.children[n];
+        if (!slot) return;
+        const g = slot.querySelector("canvas").getContext("2d");
+        const b = HOTBAR[n];
+        g.imageSmoothingEnabled = false;
+        g.clearRect(0, 0, 32, 32);
+        g.drawImage(atlasCanvas, (b === GRASS ? 1 : tileFor(b, 2)) * TILE, 0, TILE, TILE, 0, 0, 32, 32);
+    }
+
+    function setSlot(n, b) {
+        HOTBAR[n] = b;
+        drawSlot(n);
+    }
+
     function buildHotbar() {
         hotbarEl.replaceChildren();
         HOTBAR.forEach((b, n) => {
@@ -2752,16 +2884,13 @@ startChat();
             slot.className = "slot";
             const c = document.createElement("canvas");
             c.width = 32; c.height = 32;
-            const g = c.getContext("2d");
-            g.imageSmoothingEnabled = false;
-            const tIdx = b === GRASS ? 1 : tileFor(b, 2);
-            g.drawImage(atlasCanvas, tIdx * TILE, 0, TILE, TILE, 0, 0, 32, 32);
             slot.appendChild(c);
             const num = document.createElement("span");
             num.textContent = n + 1;
             slot.appendChild(num);
             slot.addEventListener("click", () => selectSlot(n));
             hotbarEl.appendChild(slot);
+            drawSlot(n);
         });
         selectSlot(0);
     }
@@ -2778,6 +2907,11 @@ startChat();
             lastSpace = now;
         }
         if (e.code === "KeyV") view = (view + 1) % 3;
+        if (e.code === "KeyE" || e.code === "KeyQ") {
+            const cur = PALETTE.indexOf(HOTBAR[sel]);
+            const step = e.code === "KeyE" ? 1 : -1;
+            setSlot(sel, PALETTE[(cur + step + PALETTE.length) % PALETTE.length]);
+        }
         if (e.code.startsWith("Digit")) {
             const n = parseInt(e.code.slice(5), 10);
             if (n >= 1 && n <= HOTBAR.length) selectSlot(n - 1);
@@ -2795,8 +2929,12 @@ startChat();
     canvas.addEventListener("mousedown", (e) => {
         if (!isLocked()) return;
         e.preventDefault();
-        if (e.button === 0) { mouse[0] = true; actBreak(); actTimer = 0; }
+        if (e.button === 0) mouse[0] = true;
         if (e.button === 2) { mouse[2] = true; actPlace(); actTimer = 0; }
+        if (e.button === 1 && target) { // middle click: pick block
+            const b = getBlock(target.x, target.y, target.z);
+            if (PALETTE.includes(b)) setSlot(sel, b);
+        }
     });
     document.addEventListener("mouseup", (e) => { mouse[e.button] = false; });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -2841,6 +2979,7 @@ startChat();
         litMats.forEach((m) => m.color.setScalar(b));
         terrainMat.color.setScalar(b);
         waterMat.color.setScalar(b);
+        cloudMat.color.setScalar(b);
 
         const cp = camera.position;
         sunMesh.position.set(cp.x + Math.cos(a) * 150, cp.y + Math.sin(a) * 150, cp.z + 20);
@@ -2885,6 +3024,36 @@ startChat();
         );
         highlight.visible = false;
         scene.add(highlight);
+
+        // Dark overlay that fades in while you mine a block
+        crack = new THREE_.Mesh(
+            new THREE_.BoxGeometry(1.01, 1.01, 1.01),
+            new THREE_.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, depthWrite: false, fog: false })
+        );
+        crack.visible = false;
+        scene.add(crack);
+
+        // Blocky clouds that drift across the sky
+        const cc = document.createElement("canvas");
+        cc.width = cc.height = 32;
+        const cg = cc.getContext("2d");
+        cg.fillStyle = "#fff";
+        for (let i = 0; i < 32; i += 2) {
+            for (let k = 0; k < 32; k += 2) {
+                if (fbm(i / 8, k / 8) > 0.55) cg.fillRect(i, k, 2, 2);
+            }
+        }
+        const ct = new THREE_.CanvasTexture(cc);
+        ct.magFilter = THREE_.NearestFilter;
+        ct.minFilter = THREE_.NearestFilter;
+        ct.generateMipmaps = false;
+        ct.wrapS = ct.wrapT = THREE_.RepeatWrapping;
+        ct.repeat.set(4, 4);
+        cloudMat = new THREE_.MeshBasicMaterial({ map: ct, transparent: true, opacity: 0.8, depthWrite: false, fog: false, side: THREE_.DoubleSide });
+        clouds = new THREE_.Mesh(new THREE_.PlaneGeometry(512, 512), cloudMat);
+        clouds.rotation.x = -Math.PI / 2;
+        clouds.position.y = H + 12;
+        scene.add(clouds);
 
         const orb = (color) => {
             const m = new THREE_.Mesh(new THREE_.PlaneGeometry(26, 26), new THREE_.MeshBasicMaterial({ color: color, fog: false }));
@@ -2939,11 +3108,10 @@ startChat();
 
         if (isLocked()) {
             actTimer += dt;
-            if (actTimer > 0.22) {
-                if (mouse[0]) { actBreak(); actTimer = 0; }
-                else if (mouse[2]) { actPlace(); actTimer = 0; }
-            }
+            if (actTimer > 0.22 && mouse[2]) { actPlace(); actTimer = 0; }
         }
+        updateMining(dt);
+        updateParticles(dt);
 
         flushDirty(4);
 
@@ -2963,6 +3131,11 @@ startChat();
             camera.position.set(eye[0] + dir[0] * sign * d, eye[1] + dir[1] * sign * d, eye[2] + dir[2] * sign * d);
             camera.lookAt(eye[0], eye[1], eye[2]);
         }
+
+        // Clouds follow the camera, and the texture scrolls so they stay put in the world
+        clouds.position.x = camera.position.x;
+        clouds.position.z = camera.position.z;
+        cloudMat.map.offset.set(camera.position.x / 128 + t * 0.003, -camera.position.z / 128);
 
         // Target block
         target = raycast(eye[0], eye[1], eye[2], dir[0], dir[1], dir[2], 6);
