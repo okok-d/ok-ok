@@ -83,7 +83,6 @@
                     Direct messages
                     <span id="dmBadge" class="badge" hidden></span>
                 </button>
-                <button id="tabGame" class="tab">Block World</button>
                 <button id="tabAdmin" class="tab" hidden>Admin</button>
             </div>
 
@@ -153,56 +152,6 @@
                 </div>
 
                 <div id="adminList"></div>
-            </div>
-
-            <!-- Block World (game) -->
-            <div id="gamePanel" hidden>
-                <div id="mcWrap">
-                    <canvas id="mcCanvas"></canvas>
-
-                    <div id="mcHud">
-                        <div id="mcCross"></div>
-                        <div id="mcInfo"></div>
-                        <div id="mcPlayers"></div>
-                        <div id="mcHotbar"></div>
-                    </div>
-
-                    <div id="mcMenu">
-                        <h2>BLOCK WORLD</h2>
-                        <p id="mcWho"></p>
-                        <button id="mcPlay">Click to play</button>
-                        <div id="mcLoad" class="mc-load"><div id="mcLoadBar"></div></div>
-
-                        <div class="mc-box">
-                            <div class="mc-label">Display name</div>
-                            <div class="mc-row">
-                                <input id="mcName" type="text" maxlength="30">
-                                <button id="mcNameBtn">Change</button>
-                            </div>
-                            <p id="mcNameNote" class="mc-note"></p>
-                        </div>
-
-                        <div class="mc-box">
-                            <div class="mc-label">Skin (Minecraft 64x64 format)</div>
-                            <div class="mc-row">
-                                <select id="mcSkinSelect">
-                                    <option value="default">Default</option>
-                                    <option value="b:zombie_nurse">Zombie Nurse</option>
-                                    <option value="custom" disabled>My uploaded skin</option>
-                                </select>
-                            </div>
-                            <div class="mc-label" style="margin-top: 8px;">Upload your own (64x64 PNG, 1 MB max)</div>
-                            <div class="mc-row">
-                                <input id="mcSkinFile" type="file" accept="image/png">
-                                <button id="mcSkinReset">Remove upload</button>
-                            </div>
-                        </div>
-
-                        <p class="mc-note">WASD move · Space jump (double-tap to fly) · Shift sprint · Hold left click to mine · Right click place · Middle click pick block · E / Q change block · 1-9 or wheel hotbar · V or F5 first / third person camera</p>
-                        <p id="mcMsg" class="mc-note"></p>
-                        <button id="mcFull">Fullscreen</button>
-                    </div>
-                </div>
             </div>
 
         </section>
