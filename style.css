@@ -450,3 +450,94 @@ button.danger { color: #e53935; border-color: #e53935; }
 
 /* IDs beat the [hidden] attribute, so hide these explicitly */
 #profileEdit[hidden] { display: none; }
+
+/* ===================================================================
+   Block World (the Game tab)
+   =================================================================== */
+
+#gamePanel[hidden] { display: none; }
+
+#mcWrap {
+    position: relative;
+    width: 100%;
+    height: min(72vh, 560px);
+    min-height: 380px;
+    background: #000;
+    overflow: hidden;
+    user-select: none;
+}
+
+#mcWrap:fullscreen { height: 100vh; }
+
+#mcCanvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+
+/* HUD */
+#mcHud { position: absolute; inset: 0; pointer-events: none; font-family: monospace; color: #fff; text-shadow: 1px 1px 0 #000; }
+
+#mcCross {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 18px; height: 18px;
+    transform: translate(-50%, -50%);
+}
+#mcCross::before, #mcCross::after { content: ""; position: absolute; background: #fff; mix-blend-mode: difference; }
+#mcCross::before { left: 8px; top: 0; width: 2px; height: 18px; }
+#mcCross::after { left: 0; top: 8px; width: 18px; height: 2px; }
+
+#mcInfo { position: absolute; left: 8px; top: 6px; font-size: 12px; }
+#mcPlayers { position: absolute; right: 8px; top: 6px; font-size: 12px; text-align: right; max-width: 55%; }
+
+#mcHotbar {
+    position: absolute;
+    left: 50%; bottom: 10px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    background: rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+}
+
+#mcHotbar .slot {
+    position: relative;
+    width: 42px; height: 42px;
+    padding: 3px;
+    border: 2px solid #555;
+    background: rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+}
+#mcHotbar .slot.sel { border-color: #fff; background: rgba(255, 255, 255, 0.25); }
+#mcHotbar canvas { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+#mcHotbar span { position: absolute; right: 3px; bottom: 0; font-size: 10px; }
+
+/* Menu */
+#mcMenu {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    text-align: center;
+}
+#mcMenu[hidden] { display: none; }
+
+#mcMenu h2 { margin: 0; letter-spacing: 2px; }
+#mcWho { margin: 0; color: #ccc; }
+
+#mcMenu button { background: #fff; color: #000; border-color: #fff; }
+#mcMenu button:hover { background: #ddd; }
+#mcMenu button:disabled { opacity: 0.5; }
+#mcPlay { font-size: 18px; padding: 12px 36px; }
+
+.mc-box { width: min(420px, 100%); text-align: left; }
+.mc-row { display: flex; gap: 8px; }
+.mc-row input[type="text"] { background: #111; color: #fff; border-color: #666; }
+.mc-row input[type="file"] { color: #ccc; font-size: 12px; }
+.mc-label { font-size: 12px; color: #aaa; margin-bottom: 4px; }
+.mc-note { margin: 0; font-size: 12px; color: #bbb; max-width: 420px; }
